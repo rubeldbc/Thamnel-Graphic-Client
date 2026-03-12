@@ -1,9 +1,8 @@
 import {
-  mdiPlus,
-  mdiDelete,
-  mdiRefresh,
-  mdiFolderOpen,
-  mdiPlusBox,
+  mdiFilePlusOutline,
+  mdiPlaylistPlus,
+  mdiFolderPlusOutline,
+  mdiFolderMultipleOutline,
 } from '@mdi/js';
 import { Icon } from '../common/Icon';
 import { useMediaStore } from '../../stores/mediaStore';
@@ -29,7 +28,6 @@ export function VideoBrowserTab() {
   const videos = useMediaStore((s) => s.videos);
   const activeVideoId = useMediaStore((s) => s.activeVideoId);
   const addVideo = useMediaStore((s) => s.addVideo);
-  const removeVideo = useMediaStore((s) => s.removeVideo);
   const setActiveVideo = useMediaStore((s) => s.setActiveVideo);
   const setVideoExtracted = useMediaStore((s) => s.setVideoExtracted);
   const setExtractionProgress = useMediaStore((s) => s.setExtractionProgress);
@@ -66,12 +64,6 @@ export function VideoBrowserTab() {
     });
   };
 
-  const handleRemove = () => {
-    if (activeVideoId) {
-      removeVideo(activeVideoId);
-    }
-  };
-
   const handleDoubleClick = (videoId: string) => {
     // Simulate frame extraction
     setExtractionProgress(0);
@@ -93,11 +85,10 @@ export function VideoBrowserTab() {
   };
 
   const ACTIONS: ActionBtn[] = [
-    { icon: mdiPlus, title: 'Add Video', testId: 'vb-add', onClick: handleAddVideo },
-    { icon: mdiPlusBox, title: 'Append Videos', testId: 'vb-append', onClick: handleAppendVideos },
-    { icon: mdiDelete, title: 'Remove', testId: 'vb-remove', onClick: handleRemove },
-    { icon: mdiRefresh, title: 'Refresh', testId: 'vb-refresh' },
-    { icon: mdiFolderOpen, title: 'Open Folder', testId: 'vb-open-folder' },
+    { icon: mdiFilePlusOutline, title: 'Add Videos (clear list first)...', testId: 'vb-add', onClick: handleAddVideo },
+    { icon: mdiPlaylistPlus, title: 'Append Videos (keep existing)...', testId: 'vb-append', onClick: handleAppendVideos },
+    { icon: mdiFolderPlusOutline, title: 'Add Folder (clear list first)...', testId: 'vb-add-folder' },
+    { icon: mdiFolderMultipleOutline, title: 'Append Folder (keep existing)...', testId: 'vb-append-folder' },
   ];
 
   return (
@@ -105,24 +96,13 @@ export function VideoBrowserTab() {
       data-testid="video-browser-tab"
       className="flex h-full flex-col overflow-hidden"
     >
-      {/* Header */}
-      <div
-        className="flex shrink-0 items-center px-2 select-none"
-        style={{ height: 28 }}
-      >
-        <span
-          className="text-[11px] font-bold"
-          style={{ color: 'var(--accent-orange)' }}
-          data-testid="vb-header"
-        >
-          VIDEO BROWSER
-        </span>
-      </div>
-
       {/* Action buttons row */}
       <div
-        className="flex shrink-0 items-center gap-1 border-b px-2 pb-1"
-        style={{ borderColor: 'var(--border-color)' }}
+        className="flex shrink-0 items-center justify-end gap-0.5 border-b px-1.5 select-none"
+        style={{
+          height: 28,
+          borderColor: 'var(--border-color)',
+        }}
       >
         {ACTIONS.map((a) => (
           <button
@@ -130,7 +110,7 @@ export function VideoBrowserTab() {
             data-testid={a.testId}
             title={a.title}
             className="tg-hoverable flex items-center justify-center rounded"
-            style={{ width: 26, height: 26 }}
+            style={{ width: 26, height: 26, padding: '4px 2px' }}
             onClick={a.onClick}
           >
             <Icon path={a.icon} size="sm" />

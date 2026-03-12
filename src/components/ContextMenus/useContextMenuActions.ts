@@ -125,7 +125,22 @@ const GROUP_ACTION_MAP: Record<string, () => void> = {
   rename: () => useUiStore.getState().setActiveDialog('renameLayer'),
   'duplicate-group': () => execCommand('duplicateLayer'),
   'new-sub-group': () => execCommand('addNewGroup'),
-  ungroup: () => execCommand('ungroup'),
+  'release-all-items': () => {
+    const state = useDocumentStore.getState();
+    if (state.selectedLayerIds.length !== 1) return;
+    const groupId = state.selectedLayerIds[0];
+    const group = state.project.layers.find((l) => l.id === groupId);
+    if (!group || group.type !== 'group') return;
+    state.pushUndo();
+    // Detach all children from the group
+    for (const layer of state.project.layers) {
+      if (layer.parentGroupId === groupId) {
+        state.updateLayer(layer.id, { parentGroupId: null, depth: 0 });
+      }
+    }
+    // Remove the now-empty group
+    state.removeLayer(groupId);
+  },
   'delete-group': () => execCommand('deleteLayer'),
   'super-lock-toggle': () => {
     const state = useDocumentStore.getState();

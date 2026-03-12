@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { useUiStore } from '../../stores/uiStore';
 import { useDocumentStore } from '../../stores/documentStore';
+import { useDialogStore } from '../../stores/dialogStore';
 import { SettingsWindow } from './SettingsWindow';
 import { AboutWindow } from './AboutWindow';
 import { DebugWindow } from './DebugWindow';
@@ -12,6 +13,25 @@ import { NewDocumentDialog } from './NewDocumentDialog';
 import { FillPickerWindow } from './FillPickerWindow';
 import { ShapeDrawingWindow } from './ShapeDrawingWindow';
 import { TextPropertiesWindow } from './TextPropertiesWindow';
+import { InputDialog } from './InputDialog';
+import { NotificationDialog } from './NotificationDialog';
+import { ProgressWindow } from './ProgressWindow';
+import { EnhanceSettingsDialog } from './EnhanceSettingsDialog';
+import { EraserSettingsWindow } from './EraserSettingsWindow';
+import { BlurBrushSettingsWindow } from './BlurBrushSettingsWindow';
+import { BgStudioBrushSettingsWindow } from './BgStudioBrushSettingsWindow';
+import { BgFillFramePickerWindow } from './BgFillFramePickerWindow';
+import { FramePreviewWindow } from './FramePreviewWindow';
+import { ImageGalleryDialog } from './ImageGalleryDialog';
+import { GalleryWindow } from './GalleryWindow';
+import { InstantTextEditorWindow } from './InstantTextEditorWindow';
+import { LinkedTextEditorWindow } from './LinkedTextEditorWindow';
+import { TextLinkConfigWindow } from './TextLinkConfigWindow';
+import { DateStampWindow } from './DateStampWindow';
+import { TransparencyManagerWindow } from './TransparencyManagerWindow';
+import { FaceBlurWindow } from './FaceBlurWindow';
+import { LogoRemovalWindow } from './LogoRemovalWindow';
+import { ProjectImportWindow } from './ProjectImportWindow';
 
 /**
  * Centralised dialog host that subscribes to `activeDialog` in the UI store
@@ -23,6 +43,14 @@ export function DialogHost() {
   const activeDialog = useUiStore((s) => s.activeDialog);
   const canvasWidth = useDocumentStore((s) => s.project.canvasWidth);
   const canvasHeight = useDocumentStore((s) => s.project.canvasHeight);
+
+  // Callback-based dialog stores
+  const inputConfig = useDialogStore((s) => s.inputConfig);
+  const closeInput = useDialogStore((s) => s.closeInput);
+  const notificationConfig = useDialogStore((s) => s.notificationConfig);
+  const closeNotification = useDialogStore((s) => s.closeNotification);
+  const progressConfig = useDialogStore((s) => s.progressConfig);
+  const closeProgress = useDialogStore((s) => s.closeProgress);
 
   const close = useCallback(() => {
     useUiStore.getState().setActiveDialog(null);
@@ -172,15 +200,135 @@ export function DialogHost() {
         onOpenChange={handleOpenChange}
       />
 
-      {/* Eraser Settings (reuse Settings with placeholder) */}
-      <DebugWindow
+      {/* --- New dialogs --- */}
+
+      {/* Input Dialog (callback-based via dialogStore) */}
+      <InputDialog
+        open={inputConfig !== null}
+        onOpenChange={(open) => { if (!open) closeInput(); }}
+        title={inputConfig?.title}
+        prompt={inputConfig?.prompt}
+        defaultValue={inputConfig?.defaultValue}
+        onOk={inputConfig?.onOk}
+      />
+
+      {/* Notification Dialog (callback-based via dialogStore) */}
+      <NotificationDialog
+        open={notificationConfig !== null}
+        onOpenChange={(open) => { if (!open) closeNotification(); }}
+        title={notificationConfig?.title}
+        message={notificationConfig?.message}
+        icon={notificationConfig?.icon}
+        buttons={notificationConfig?.buttons}
+        onResult={notificationConfig?.onResult}
+      />
+
+      {/* Progress Window (callback-based via dialogStore) */}
+      <ProgressWindow
+        open={progressConfig !== null}
+        onOpenChange={(open) => { if (!open) closeProgress(); }}
+        title={progressConfig?.title}
+        statusText={progressConfig?.statusText}
+        progressPercent={progressConfig?.progressPercent}
+        stepText={progressConfig?.stepText}
+        modelName={progressConfig?.modelName}
+        description={progressConfig?.description}
+        onCancel={progressConfig?.onCancel}
+      />
+
+      {/* Enhance Settings */}
+      <EnhanceSettingsDialog
+        open={activeDialog === 'enhanceSettings'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Eraser Settings */}
+      <EraserSettingsWindow
         open={activeDialog === 'eraserSettings'}
         onOpenChange={handleOpenChange}
       />
 
-      {/* Blur Brush Settings (reuse Debug as placeholder) */}
-      <DebugWindow
+      {/* Blur Brush Settings */}
+      <BlurBrushSettingsWindow
         open={activeDialog === 'blurBrushSettings'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* BG Studio Brush Settings */}
+      <BgStudioBrushSettingsWindow
+        open={activeDialog === 'bgStudioBrushSettings'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* BG Fill Frame Picker */}
+      <BgFillFramePickerWindow
+        open={activeDialog === 'bgFillFramePicker'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Frame Preview */}
+      <FramePreviewWindow
+        open={activeDialog === 'framePreview'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Image Gallery */}
+      <ImageGalleryDialog
+        open={activeDialog === 'imageGallery'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Gallery */}
+      <GalleryWindow
+        open={activeDialog === 'gallery'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Instant Text Editor */}
+      <InstantTextEditorWindow
+        open={activeDialog === 'instantTextEditor'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Linked Text Editor */}
+      <LinkedTextEditorWindow
+        open={activeDialog === 'linkedTextEditor'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Text Link Config */}
+      <TextLinkConfigWindow
+        open={activeDialog === 'textLinkConfig'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Date Stamp */}
+      <DateStampWindow
+        open={activeDialog === 'dateStamp'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Transparency Manager */}
+      <TransparencyManagerWindow
+        open={activeDialog === 'transparencyManager'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Face Blur */}
+      <FaceBlurWindow
+        open={activeDialog === 'faceBlur'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Logo Removal */}
+      <LogoRemovalWindow
+        open={activeDialog === 'logoRemoval'}
+        onOpenChange={handleOpenChange}
+      />
+
+      {/* Project Import */}
+      <ProjectImportWindow
+        open={activeDialog === 'projectImport'}
         onOpenChange={handleOpenChange}
       />
     </>

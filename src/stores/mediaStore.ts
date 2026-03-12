@@ -71,6 +71,11 @@ export interface MediaState {
   selectedFolderId: string | null;
   imageSearchQuery: string;
   thumbSize: number;
+  folderTreeCollapsed: boolean;
+  /** 0 = Large Thumbnails, 1 = Mini List, 2 = File List */
+  viewMode: 0 | 1 | 2;
+  /** 0 = Name A-Z, 1 = Name Z-A, 2 = Date Created, 3 = File Size */
+  sortMode: 0 | 1 | 2 | 3;
 
   // Server connection
   textServerConnected: boolean;
@@ -105,6 +110,9 @@ export interface MediaActions {
   setSelectedFolder: (folderId: string | null) => void;
   setImageSearchQuery: (query: string) => void;
   setThumbSize: (size: number) => void;
+  setFolderTreeCollapsed: (collapsed: boolean) => void;
+  cycleViewMode: () => void;
+  cycleSortMode: () => void;
 
   // Server
   setTextServerConnected: (connected: boolean) => void;
@@ -127,7 +135,10 @@ export const useMediaStore = create<MediaStore>((set) => ({
   imageFolders: [],
   selectedFolderId: null,
   imageSearchQuery: '',
-  thumbSize: 100,
+  thumbSize: 120,
+  folderTreeCollapsed: false,
+  viewMode: 0,
+  sortMode: 0,
   textServerConnected: false,
   renderServerConnected: false,
   inferenceDevice: 'CPU',
@@ -186,6 +197,11 @@ export const useMediaStore = create<MediaStore>((set) => ({
   setSelectedFolder: (folderId) => set({ selectedFolderId: folderId }),
   setImageSearchQuery: (query) => set({ imageSearchQuery: query }),
   setThumbSize: (size) => set({ thumbSize: size }),
+  setFolderTreeCollapsed: (collapsed) => set({ folderTreeCollapsed: collapsed }),
+  cycleViewMode: () =>
+    set((state) => ({ viewMode: ((state.viewMode + 1) % 3) as 0 | 1 | 2 })),
+  cycleSortMode: () =>
+    set((state) => ({ sortMode: ((state.sortMode + 1) % 4) as 0 | 1 | 2 | 3 })),
 
   // Server actions
   setTextServerConnected: (connected) => set({ textServerConnected: connected }),

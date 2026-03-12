@@ -27,8 +27,8 @@ describe('LeftTabPanel', () => {
     expect(videoContent).toBeInTheDocument();
     expect(videoContent).not.toHaveAttribute('hidden');
 
-    // The Video Browser header should be visible
-    expect(screen.getByTestId('vb-header')).toBeInTheDocument();
+    // The Video Browser tab content should be visible
+    expect(screen.getByTestId('video-browser-tab')).toBeInTheDocument();
   });
 
   it('tab switching works', async () => {
@@ -65,12 +65,8 @@ describe('LeftTabPanel', () => {
 // ---------------------------------------------------------------------------
 
 describe('VideoBrowserTab', () => {
-  it('shows header and empty state', () => {
+  it('shows empty state', () => {
     render(<VideoBrowserTab />);
-
-    const header = screen.getByTestId('vb-header');
-    expect(header).toBeInTheDocument();
-    expect(header.textContent).toBe('VIDEO BROWSER');
 
     expect(screen.getByTestId('vb-empty')).toBeInTheDocument();
     expect(screen.getByTestId('vb-empty').textContent).toBe('No videos loaded');
@@ -80,9 +76,9 @@ describe('VideoBrowserTab', () => {
     render(<VideoBrowserTab />);
 
     expect(screen.getByTestId('vb-add')).toBeInTheDocument();
-    expect(screen.getByTestId('vb-remove')).toBeInTheDocument();
-    expect(screen.getByTestId('vb-refresh')).toBeInTheDocument();
-    expect(screen.getByTestId('vb-open-folder')).toBeInTheDocument();
+    expect(screen.getByTestId('vb-append')).toBeInTheDocument();
+    expect(screen.getByTestId('vb-add-folder')).toBeInTheDocument();
+    expect(screen.getByTestId('vb-append-folder')).toBeInTheDocument();
   });
 });
 
@@ -102,8 +98,9 @@ describe('ImageGalleryTab', () => {
   it('shows toolbar buttons', () => {
     render(<ImageGalleryTab />);
 
-    expect(screen.getByTestId('ig-folders')).toBeInTheDocument();
     expect(screen.getByTestId('ig-refresh')).toBeInTheDocument();
+    expect(screen.getByTestId('ig-toggle-folders')).toBeInTheDocument();
+    expect(screen.getByTestId('ig-download')).toBeInTheDocument();
     expect(screen.getByTestId('ig-view-mode')).toBeInTheDocument();
     expect(screen.getByTestId('ig-sort')).toBeInTheDocument();
   });
@@ -121,14 +118,6 @@ describe('ImageGalleryTab', () => {
 // ---------------------------------------------------------------------------
 
 describe('ServerAudioTab', () => {
-  it('shows header', () => {
-    render(<ServerAudioTab />);
-
-    const header = screen.getByTestId('sa-header');
-    expect(header).toBeInTheDocument();
-    expect(header.textContent).toBe('SERVER AUDIO');
-  });
-
   it('shows empty state and refresh button', () => {
     render(<ServerAudioTab />);
 

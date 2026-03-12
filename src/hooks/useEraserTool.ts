@@ -301,6 +301,8 @@ export function useEraserTool(active: boolean = true): EraserToolResult {
     if (!active) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (e.key === '[') {
         setBrushSizeState((prev) => clampSize(prev - BRUSH_STEP));
       } else if (e.key === ']') {

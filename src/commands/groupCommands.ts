@@ -6,13 +6,51 @@ function selectedCount(): number {
   return useDocumentStore.getState().selectedLayerIds.length;
 }
 
-function selectedIsGroup(): boolean {
+/**
+ * Returns the group ID to ungroup, or null if not applicable.
+ * Works when either:
+ * - A group layer itself is selected (e.g. from the Layers panel), OR
+ * - One or more children of the same group are selected (from canvas).
+ */
+function findGroupToUngroup(): string | null {
   const state = useDocumentStore.getState();
-  if (state.selectedLayerIds.length !== 1) return false;
-  const layer = state.project.layers.find(
-    (l) => l.id === state.selectedLayerIds[0],
+  if (state.selectedLayerIds.length === 0) return null;
+
+  // Case 1: a group layer is directly selected
+  if (state.selectedLayerIds.length === 1) {
+    const layer = state.project.layers.find(
+      (l) => l.id === state.selectedLayerIds[0],
+    );
+    if (layer?.type === 'group') return layer.id;
+  }
+
+  // Case 2: selected layers share a common parent group
+  const selectedLayers = state.project.layers.filter((l) =>
+    state.selectedLayerIds.includes(l.id),
   );
-  return layer?.type === 'group';
+  const parentIds = new Set(
+    selectedLayers.map((l) => l.parentGroupId).filter(Boolean),
+  );
+  if (parentIds.size === 1) {
+    const parentId = [...parentIds][0]!;
+    const parent = state.project.layers.find((l) => l.id === parentId);
+    if (parent?.type === 'group') return parent.id;
+  }
+
+  // Case 3: single child of a group is selected
+  if (state.selectedLayerIds.length === 1) {
+    const layer = state.project.layers.find(
+      (l) => l.id === state.selectedLayerIds[0],
+    );
+    if (layer?.parentGroupId) {
+      const parent = state.project.layers.find(
+        (l) => l.id === layer.parentGroupId,
+      );
+      if (parent?.type === 'group') return parent.id;
+    }
+  }
+
+  return null;
 }
 
 function hasSelectionInGroup(): boolean {
@@ -50,19 +88,30 @@ export const ungroup: Command = {
   name: 'ungroup',
   shortcut: 'Ctrl+Shift+G',
   category: 'group',
-  canExecute: () => selectedIsGroup(),
+  canExecute: () => findGroupToUngroup() !== null,
   execute: () => {
+    const groupId = findGroupToUngroup();
+    if (!groupId) return;
+
     const state = useDocumentStore.getState();
     state.pushUndo();
-    const groupId = state.selectedLayerIds[0];
-    // Remove parentGroupId from children
+
+    // Collect child IDs before ungrouping
+    const childIds: string[] = [];
     for (const layer of state.project.layers) {
       if (layer.parentGroupId === groupId) {
+        childIds.push(layer.id);
         state.updateLayer(layer.id, { parentGroupId: null, depth: 0 });
       }
     }
+
     // Remove group layer itself
     state.removeLayer(groupId);
+
+    // Select the former children
+    if (childIds.length > 0) {
+      useDocumentStore.setState({ selectedLayerIds: childIds });
+    }
   },
 };
 

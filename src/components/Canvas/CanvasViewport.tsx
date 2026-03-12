@@ -251,6 +251,8 @@ export function CanvasViewport({
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       // Only during active shape drawing with rectangle tool
       if (interaction.dragMode !== 'drawShape') return;
       const shapeType = useUiStore.getState().selectedShapeType;
@@ -375,12 +377,16 @@ export function CanvasViewport({
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (e.code === 'Space' && !e.repeat) {
         e.preventDefault();
         setSpaceDown(true);
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (e.code === 'Space') {
         setSpaceDown(false);
         setIsPanning(false);

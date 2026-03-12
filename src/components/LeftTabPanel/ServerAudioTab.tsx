@@ -30,24 +30,16 @@ export function ServerAudioTab() {
       data-testid="server-audio-tab"
       className="flex h-full flex-col overflow-hidden"
     >
-      {/* Header */}
+      {/* Action buttons row */}
       <div
-        className="flex shrink-0 items-center justify-between px-2 select-none"
+        className="flex shrink-0 items-center justify-end px-1.5 select-none"
         style={{ height: 28 }}
       >
-        <span
-          className="text-[11px] font-bold"
-          style={{ color: 'var(--accent-orange)' }}
-          data-testid="sa-header"
-        >
-          SERVER AUDIO
-        </span>
-
         <button
           data-testid="sa-refresh"
           title="Refresh"
           className="tg-hoverable flex items-center justify-center rounded"
-          style={{ width: 24, height: 24 }}
+          style={{ width: 26, height: 26, padding: '4px 2px' }}
           onClick={handleRefresh}
         >
           <Icon path={mdiRefresh} size="sm" />

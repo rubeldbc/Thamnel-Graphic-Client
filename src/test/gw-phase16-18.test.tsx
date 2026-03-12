@@ -129,13 +129,6 @@ describe('Phase 16 — Left Tab Panel', () => {
   // 16A — Video Browser
   // -----------------------------------------------------------------------
   describe('Video Browser tab', () => {
-    it('displays "VIDEO BROWSER" header in orange', () => {
-      render(<LeftTabPanel />);
-      const header = screen.getByTestId('vb-header');
-      expect(header).toHaveTextContent('VIDEO BROWSER');
-      expect(header).toHaveStyle({ color: 'var(--accent-orange)' });
-    });
-
     it('shows "No videos loaded" when store is empty', () => {
       render(<LeftTabPanel />);
       expect(screen.getByTestId('vb-empty')).toHaveTextContent(
@@ -318,7 +311,7 @@ describe('Phase 16 — Left Tab Panel', () => {
       await user.click(screen.getByTestId('tab-trigger-image'));
 
       expect(screen.getByTestId('ig-refresh')).toBeInTheDocument();
-      expect(screen.getByTestId('ig-collapse')).toBeInTheDocument();
+      expect(screen.getByTestId('ig-toggle-folders')).toBeInTheDocument();
     });
   });
 
@@ -326,16 +319,6 @@ describe('Phase 16 — Left Tab Panel', () => {
   // 16C — Server Audio
   // -----------------------------------------------------------------------
   describe('Server Audio tab', () => {
-    it('displays "SERVER AUDIO" header in orange', async () => {
-      const user = userEvent.setup();
-      render(<LeftTabPanel />);
-      await user.click(screen.getByTestId('tab-trigger-audio'));
-
-      const header = screen.getByTestId('sa-header');
-      expect(header).toHaveTextContent('SERVER AUDIO');
-      expect(header).toHaveStyle({ color: 'var(--accent-orange)' });
-    });
-
     it('shows Refresh button', async () => {
       const user = userEvent.setup();
       render(<LeftTabPanel />);

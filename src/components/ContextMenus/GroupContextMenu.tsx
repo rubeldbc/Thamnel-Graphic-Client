@@ -4,6 +4,8 @@ import * as ContextMenu from '@radix-ui/react-context-menu';
 export interface GroupContextMenuProps {
   /** Callback invoked with the action name when a menu item is clicked. */
   onAction: (action: string) => void;
+  /** The display name of the group (used in menu labels). */
+  groupName?: string;
   /** The trigger element (group row in the layer panel). */
   children: ReactNode;
 }
@@ -36,7 +38,7 @@ const subTriggerClass =
 /**
  * Context menu shown on right-click of a group in the layer panel.
  */
-export function GroupContextMenu({ onAction, children }: GroupContextMenuProps) {
+export function GroupContextMenu({ onAction, groupName = 'Group', children }: GroupContextMenuProps) {
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
@@ -83,14 +85,14 @@ export function GroupContextMenu({ onAction, children }: GroupContextMenuProps) 
 
           <ContextMenu.Separator className={menuSeparatorClass} />
 
-          <ContextMenu.Item className={menuItemClass} onSelect={() => onAction('ungroup')}>
-            Ungroup
+          <ContextMenu.Item className={menuItemClass} onSelect={() => onAction('release-all-items')}>
+            Release all Items
           </ContextMenu.Item>
           <ContextMenu.Item
             className={menuItemClass + ' text-[var(--color-delete-red)]'}
             onSelect={() => onAction('delete-group')}
           >
-            Delete Group
+            Delete {groupName} Group
           </ContextMenu.Item>
 
           <ContextMenu.Separator className={menuSeparatorClass} />

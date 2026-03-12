@@ -48,7 +48,7 @@ export function LeftTabPanel({ visible = true }: LeftTabPanelProps) {
             key={tab.value}
             value={tab.value}
             data-testid={`tab-trigger-${tab.value}`}
-            className="tg-hoverable flex-1 px-1 text-center text-[11px] leading-[28px] data-[state=active]:text-accent-orange data-[state=active]:shadow-[inset_0_-2px_0_var(--accent-orange)]"
+            className="tg-hoverable px-2.5 text-center text-[11px] whitespace-nowrap leading-[28px] data-[state=active]:text-accent-orange data-[state=active]:shadow-[inset_0_-2px_0_var(--accent-orange)]"
             style={{
               color: 'var(--text-secondary)',
               fontSize: 11,

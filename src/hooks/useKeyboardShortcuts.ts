@@ -284,6 +284,13 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
   // Keyboard listener
   // ------------------------------------------------------------------
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    // If the user is typing in an input or textarea (e.g. layer rename),
+    // suppress ALL shortcuts so keystrokes go to the field, not commands.
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') {
+      return;
+    }
+
     const combo = eventToCombo(e);
     if (!combo) return; // bare modifier press
 
@@ -299,6 +306,8 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
   }, []);
 
   const handleKeyUp = useCallback((e: KeyboardEvent) => {
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     if (e.key === ' ') {
       actionsRef.current.onPanModeEnd?.();
     }

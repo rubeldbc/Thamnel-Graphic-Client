@@ -20,6 +20,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { LayerItem, type LayerData } from './LayerItem';
 import { LayerTreeConnector } from './LayerTreeConnector';
 import { LayerFooterBar, type LayerFooterBarProps } from './LayerFooterBar';
+import { GroupContextMenu } from '../../ContextMenus/GroupContextMenu';
+import { useGroupContextMenuAction } from '../../ContextMenus/useContextMenuActions';
 import { useDocumentStore } from '../../../stores/documentStore';
 import { useUndoRedoStore } from '../../../stores/undoRedoStore';
 import { createDefaultLayer, cloneLayer, getUniqueLayerName } from '../../../types/LayerModel';
@@ -137,8 +139,9 @@ function SortableLayerRow({
   };
 
   const layerData = toLayerData(layer);
+  const groupAction = useGroupContextMenuAction();
 
-  return (
+  const rowContent = (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
       {/* Tree connector for nested items */}
       {layer.depth > 0 && (
@@ -160,6 +163,16 @@ function SortableLayerRow({
       />
     </div>
   );
+
+  if (layer.type === 'group') {
+    return (
+      <GroupContextMenu onAction={groupAction} groupName={layer.name}>
+        {rowContent}
+      </GroupContextMenu>
+    );
+  }
+
+  return rowContent;
 }
 
 // ---------------------------------------------------------------------------

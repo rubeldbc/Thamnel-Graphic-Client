@@ -98,6 +98,9 @@ export function LayerItem({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Stop all keyboard events from bubbling to the global shortcut handler
+      // so that e.g. Ctrl+G doesn't trigger "group" while renaming.
+      e.stopPropagation();
       if (e.key === 'Enter') {
         commitRename();
       } else if (e.key === 'Escape') {
