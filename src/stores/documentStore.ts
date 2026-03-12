@@ -16,9 +16,11 @@ export interface DocumentState {
 export interface DocumentActions {
   setProject: (project: ProjectModel) => void;
   addLayer: (layer: LayerModel) => void;
+  addLayerAtIndex: (layer: LayerModel, index: number) => void;
   removeLayer: (layerId: string) => void;
   updateLayer: (layerId: string, changes: Partial<LayerModel>) => void;
   moveLayer: (layerId: string, newIndex: number) => void;
+  moveLayerSubtree: (layerId: string, newIndex: number) => void;
   selectLayer: (layerId: string) => void;
   setSelectedLayerIds: (ids: string[]) => void;
   toggleSelection: (layerId: string) => void;
@@ -66,6 +68,14 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       },
     })),
 
+  addLayerAtIndex: (layer, index) =>
+    set((state) => {
+      const layers = [...state.project.layers];
+      const clamped = Math.max(0, Math.min(index, layers.length));
+      layers.splice(clamped, 0, layer);
+      return { project: { ...state.project, layers } };
+    }),
+
   removeLayer: (layerId) =>
     set((state) => ({
       project: {
@@ -93,6 +103,24 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       const [layer] = layers.splice(currentIndex, 1);
       const clampedIndex = Math.max(0, Math.min(newIndex, layers.length));
       layers.splice(clampedIndex, 0, layer);
+      return { project: { ...state.project, layers } };
+    }),
+
+  moveLayerSubtree: (layerId, newIndex) =>
+    set((state) => {
+      const layers = [...state.project.layers];
+      const idx = layers.findIndex((l) => l.id === layerId);
+      if (idx === -1) return state;
+      const baseDepth = layers[idx].depth;
+      let endIdx = idx;
+      for (let i = idx + 1; i < layers.length; i++) {
+        if (layers[i].depth > baseDepth) endIdx = i;
+        else break;
+      }
+      const subtree = layers.splice(idx, endIdx - idx + 1);
+      const adjusted = newIndex > idx ? newIndex - subtree.length : newIndex;
+      const clamped = Math.max(0, Math.min(adjusted, layers.length));
+      layers.splice(clamped, 0, ...subtree);
       return { project: { ...state.project, layers } };
     }),
 

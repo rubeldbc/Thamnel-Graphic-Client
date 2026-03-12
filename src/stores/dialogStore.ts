@@ -71,7 +71,7 @@ let _pendingPromptResolve: ((value: string | null) => void) | null = null;
 // Store
 // ---------------------------------------------------------------------------
 
-export const useDialogStore = create<DialogStore>((set, get) => ({
+export const useDialogStore = create<DialogStore>((set, _get) => ({
   // ---- Input dialog ----
   inputConfig: null,
 

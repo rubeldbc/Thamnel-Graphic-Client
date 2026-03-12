@@ -26,7 +26,7 @@ export interface InstantTextEditorWindowProps {
 export function InstantTextEditorWindow({
   open,
   onOpenChange,
-  layerId,
+  layerId: _layerId,
   initialText = '',
   fontFamily = 'Roboto',
   fontSize: initialFontSize = 24,
@@ -39,7 +39,7 @@ export function InstantTextEditorWindow({
   const [wSqueeze, setWSqueeze] = useState(0);
   const [showSliders, setShowSliders] = useState(false);
 
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Sync from props when dialog opens

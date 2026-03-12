@@ -20,14 +20,13 @@ import {
   mdiDelete,
   mdiMemory,
 } from '@mdi/js';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 export interface PropertiesTabProps {
-  /** Placeholder – kept for backward compatibility with RightPanel. */
   [key: string]: unknown;
 }
 
@@ -44,24 +43,38 @@ export function PropertiesTab(_props: PropertiesTabProps) {
   const [showPresets, setShowPresets] = useState(false);
   const [presetValue, setPresetValue] = useState('');
 
-  // Derive selected layer
-  const selectedLayer: LayerModel | null =
-    selectedLayerIds.length === 1
-      ? project.layers.find((l) => l.id === selectedLayerIds[0]) ?? null
-      : null;
-
-  // ----- Helpers -----
-  const update = useCallback(
-    (changes: Partial<LayerModel>) => {
-      if (!selectedLayer) return;
-      takeSnapshot();
-      updateLayer(selectedLayer.id, changes);
-    },
-    [selectedLayer, takeSnapshot, updateLayer],
+  // Resolve all selected layers (skip groups — they're containers)
+  const selectedLayers = useMemo(
+    () =>
+      selectedLayerIds
+        .map((id) => project.layers.find((l) => l.id === id))
+        .filter((l): l is LayerModel => l != null && l.type !== 'group'),
+    [selectedLayerIds, project.layers],
   );
 
-  // No layer selected state
-  if (!selectedLayer) {
+  // Primary layer (first selected) used to read display values
+  const primaryLayer = selectedLayers[0] ?? null;
+
+  // Type analysis: are all selected layers the same type?
+  const allSameType = selectedLayers.length > 0 && selectedLayers.every((l) => l.type === selectedLayers[0].type);
+  const allImages = allSameType && selectedLayers[0]?.type === 'image';
+  const allText = allSameType && selectedLayers[0]?.type === 'text';
+  const allShapes = allSameType && selectedLayers[0]?.type === 'shape';
+
+  // Update helper: applies changes to ALL selected layers
+  const update = useCallback(
+    (changes: Partial<LayerModel>) => {
+      if (selectedLayers.length === 0) return;
+      takeSnapshot();
+      for (const layer of selectedLayers) {
+        updateLayer(layer.id, changes);
+      }
+    },
+    [selectedLayers, takeSnapshot, updateLayer],
+  );
+
+  // No selection
+  if (!primaryLayer) {
     return (
       <div
         data-testid="properties-tab"
@@ -73,9 +86,8 @@ export function PropertiesTab(_props: PropertiesTabProps) {
     );
   }
 
-  const isImage = selectedLayer.type === 'image';
-  const isText = selectedLayer.type === 'text';
-  const isShape = selectedLayer.type === 'shape';
+  const multiCount = selectedLayers.length;
+  const isMulti = multiCount > 1;
 
   return (
     <div
@@ -83,7 +95,7 @@ export function PropertiesTab(_props: PropertiesTabProps) {
       className="flex h-full flex-col"
       style={{ backgroundColor: 'var(--panel-bg)' }}
     >
-      {/* ---- 10A: Opacity + Blend Row ---- */}
+      {/* ---- Opacity + Blend Row ---- */}
       <div
         className="flex flex-col gap-1.5 border-b px-2 py-2"
         style={{ borderColor: 'var(--border-color)', fontSize: 11 }}
@@ -108,7 +120,7 @@ export function PropertiesTab(_props: PropertiesTabProps) {
 
           {/* Blend Mode */}
           <Select.Root
-            value={selectedLayer.blendMode}
+            value={primaryLayer.blendMode}
             onValueChange={(v) => update({ blendMode: v as BlendMode })}
           >
             <Select.Trigger
@@ -158,7 +170,7 @@ export function PropertiesTab(_props: PropertiesTabProps) {
           {/* Opacity NUD */}
           <NumericUpDown
             label="Opacity"
-            value={selectedLayer.opacity}
+            value={primaryLayer.opacity}
             onChange={(v) => update({ opacity: v })}
             min={0}
             max={1}
@@ -171,7 +183,7 @@ export function PropertiesTab(_props: PropertiesTabProps) {
         <Slider.Root
           data-testid="opacity-slider"
           className="relative flex h-4 items-center"
-          value={[selectedLayer.opacity]}
+          value={[primaryLayer.opacity]}
           min={0}
           max={1}
           step={0.01}
@@ -259,11 +271,14 @@ export function PropertiesTab(_props: PropertiesTabProps) {
       {/* ---- Scrollable property expanders ---- */}
       <ScrollArea.Root className="min-h-0 flex-1" type="auto">
         <ScrollArea.Viewport className="h-full w-full">
-          <PositionExpander layer={selectedLayer} onUpdate={update} />
-          {isImage && <CropExpander layer={selectedLayer} onUpdate={update} />}
-          {isText && <TextExpander layer={selectedLayer} onUpdate={update} />}
-          {isShape && <ShapeExpander layer={selectedLayer} onUpdate={update} />}
-          <EffectsExpander layer={selectedLayer} onUpdate={update} />
+          {/* Position: always shown */}
+          <PositionExpander layer={primaryLayer} onUpdate={update} />
+          {/* Type-specific: only when all selected layers are the same type */}
+          {allImages && !isMulti && <CropExpander layer={primaryLayer} onUpdate={update} />}
+          {allText && !isMulti && <TextExpander layer={primaryLayer} onUpdate={update} />}
+          {allShapes && <ShapeExpander layer={primaryLayer} onUpdate={update} />}
+          {/* Effects: always shown (applies to all) */}
+          <EffectsExpander layer={primaryLayer} onUpdate={update} />
         </ScrollArea.Viewport>
         <ScrollArea.Scrollbar
           orientation="vertical"
@@ -276,7 +291,7 @@ export function PropertiesTab(_props: PropertiesTabProps) {
         </ScrollArea.Scrollbar>
       </ScrollArea.Root>
 
-      {/* ---- 10G: Bottom Sticky ---- */}
+      {/* ---- Bottom Sticky ---- */}
       <div
         data-testid="properties-bottom-bar"
         className="flex shrink-0 items-center justify-between border-t px-2 py-1.5"
@@ -287,11 +302,11 @@ export function PropertiesTab(_props: PropertiesTabProps) {
       >
         <div className="flex flex-col items-center gap-0.5">
           <span data-testid="layer-name" style={{ color: 'var(--accent-orange)', fontWeight: 600, fontSize: 11, textAlign: 'center' }}>
-            {selectedLayer.name}
+            {isMulti ? `${multiCount} layers selected` : primaryLayer.name}
           </span>
-          {selectedLayer.width && selectedLayer.height && (
+          {!isMulti && primaryLayer.width > 0 && primaryLayer.height > 0 && (
             <span data-testid="image-dimensions" style={{ color: 'var(--text-secondary)', fontSize: 10 }}>
-              {selectedLayer.width} x {selectedLayer.height}
+              {primaryLayer.width} x {primaryLayer.height}
             </span>
           )}
         </div>

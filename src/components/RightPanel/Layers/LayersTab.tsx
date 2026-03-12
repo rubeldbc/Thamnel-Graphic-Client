@@ -1,34 +1,36 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as ScrollArea from '@radix-ui/react-scroll-area';
 import {
   DndContext,
-  closestCenter,
+  pointerWithin,
   PointerSensor,
+  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   DragOverlay,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  useSortable,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 
 import { LayerItem, type LayerData } from './LayerItem';
-import { LayerTreeConnector } from './LayerTreeConnector';
 import { LayerFooterBar, type LayerFooterBarProps } from './LayerFooterBar';
-import { GroupContextMenu } from '../../ContextMenus/GroupContextMenu';
-import { useGroupContextMenuAction } from '../../ContextMenus/useContextMenuActions';
+import { DraggableLayerRow } from './DraggableLayerRow';
+import { DropIndicator } from './DropIndicator';
+import {
+  computeDropZone,
+  resolveDropIntent,
+  executeDropIntent,
+  type DropZone,
+  type LayerDropData,
+} from './layerDndUtils';
 import { useDocumentStore } from '../../../stores/documentStore';
 import { useUndoRedoStore } from '../../../stores/undoRedoStore';
 import { createDefaultLayer, cloneLayer, getUniqueLayerName } from '../../../types/LayerModel';
 import type { LayerModel } from '../../../types/LayerModel';
 
 // ---------------------------------------------------------------------------
-// Props (still accepted for backward-compat, but now mostly wired internally)
+// Props
 // ---------------------------------------------------------------------------
 
 export interface LayersTabProps {
@@ -45,7 +47,7 @@ export interface LayersTabProps {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers: LayerModel -> LayerData for LayerItem rendering
+// Helpers
 // ---------------------------------------------------------------------------
 
 function toLayerData(layer: LayerModel): LayerData {
@@ -65,17 +67,12 @@ function toLayerData(layer: LayerModel): LayerData {
   };
 }
 
-/**
- * Filter layers for tree display: hide children of collapsed groups.
- */
 function getVisibleTreeLayers(layers: LayerModel[]): LayerModel[] {
   const collapsedGroupIds = new Set<string>();
   const result: LayerModel[] = [];
 
   for (const layer of layers) {
-    // Skip if any ancestor is collapsed
     if (layer.parentGroupId && collapsedGroupIds.has(layer.parentGroupId)) {
-      // Mark this as collapsed too if it's a group (so its children are also hidden)
       if (layer.type === 'group') {
         collapsedGroupIds.add(layer.id);
       }
@@ -84,7 +81,6 @@ function getVisibleTreeLayers(layers: LayerModel[]): LayerModel[] {
 
     result.push(layer);
 
-    // If this is a collapsed group, mark it so children are hidden
     if (layer.type === 'group' && !layer.isExpanded) {
       collapsedGroupIds.add(layer.id);
     }
@@ -94,85 +90,29 @@ function getVisibleTreeLayers(layers: LayerModel[]): LayerModel[] {
 }
 
 // ---------------------------------------------------------------------------
-// Sortable layer row wrapper
+// Bottom drop zone — always inserts at the very bottom, outside any group
 // ---------------------------------------------------------------------------
 
-interface SortableLayerRowProps {
-  layer: LayerModel;
-  allLayers: LayerModel[];
-  isSelected: boolean;
-  onSelect: (id: string, event: React.MouseEvent) => void;
-  onToggleVisibility: (id: string) => void;
-  onToggleLock: (id: string) => void;
-  onToggleExpand: (id: string) => void;
-  onRename: (id: string, newName: string) => void;
-  isLast: boolean;
-  nextDepth: number;
-}
+const BOTTOM_DROP_ID = '__bottom_drop_zone__';
 
-function SortableLayerRow({
-  layer,
-  allLayers: _allLayers,
-  isSelected,
-  onSelect,
-  onToggleVisibility,
-  onToggleLock,
-  onToggleExpand,
-  onRename,
-  isLast,
-  nextDepth,
-}: SortableLayerRowProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: layer.id });
+function BottomDropZone({ isActive }: { isActive: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: BOTTOM_DROP_ID,
+    data: { layerId: BOTTOM_DROP_ID, isGroup: false, isExpanded: false, parentGroupId: null, depth: 0 },
+  });
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : 1,
-    position: 'relative' as const,
-  };
+  if (!isActive) return null;
 
-  const layerData = toLayerData(layer);
-  const groupAction = useGroupContextMenuAction();
-
-  const rowContent = (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      {/* Tree connector for nested items */}
-      {layer.depth > 0 && (
-        <LayerTreeConnector
-          depth={layer.depth}
-          isLast={isLast || nextDepth < layer.depth}
-          groupColor={layer.groupColor ?? '#888888'}
-        />
-      )}
-
-      <LayerItem
-        layer={layerData}
-        isSelected={isSelected}
-        onSelect={onSelect}
-        onToggleVisibility={onToggleVisibility}
-        onToggleLock={onToggleLock}
-        onToggleExpand={onToggleExpand}
-        onRename={onRename}
-      />
-    </div>
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        minHeight: 40,
+        flex: 1,
+        borderTop: isOver ? '2px solid #2196F3' : '2px solid transparent',
+      }}
+    />
   );
-
-  if (layer.type === 'group') {
-    return (
-      <GroupContextMenu onAction={groupAction} groupName={layer.name}>
-        {rowContent}
-      </GroupContextMenu>
-    );
-  }
-
-  return rowContent;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,18 +126,25 @@ export function LayersTab(_props: LayersTabProps) {
   const toggleSelection = useDocumentStore((s) => s.toggleSelection);
   const updateLayer = useDocumentStore((s) => s.updateLayer);
   const addLayer = useDocumentStore((s) => s.addLayer);
+  const addLayerAtIndex = useDocumentStore((s) => s.addLayerAtIndex);
   const removeLayer = useDocumentStore((s) => s.removeLayer);
   const moveLayer = useDocumentStore((s) => s.moveLayer);
+  const moveLayerSubtree = useDocumentStore((s) => s.moveLayerSubtree);
   const takeSnapshot = useUndoRedoStore((s) => s.takeSnapshot);
 
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [dropFeedback, setDropFeedback] = useState<{
+    layerId: string;
+    zone: DropZone;
+    rect: { top: number; bottom: number; left: number; right: number };
+  } | null>(null);
   const lastSelectedRef = useRef<string | null>(null);
+  const pointerYRef = useRef(0);
+  const listContainerRef = useRef<HTMLDivElement>(null);
 
   const layers = project.layers;
 
-  // Filter tree for display (collapsed groups hide children)
   const visibleLayers = useMemo(() => getVisibleTreeLayers(layers), [layers]);
-  const layerIds = useMemo(() => visibleLayers.map((l) => l.id), [visibleLayers]);
 
   // DnD sensors
   const sensors = useSensors(
@@ -206,34 +153,94 @@ export function LayersTab(_props: LayersTabProps) {
     }),
   );
 
-  // ---- Selection handler (click / shift+click) ----
+  // Track pointer Y during drag for zone computation
+  useEffect(() => {
+    if (!activeId) return;
+    const handler = (e: PointerEvent) => {
+      pointerYRef.current = e.clientY;
+    };
+    document.addEventListener('pointermove', handler);
+    return () => document.removeEventListener('pointermove', handler);
+  }, [activeId]);
+
+  // ---- Helper: get all leaf (non-group) descendants of a group recursively ----
+  const getGroupChildIds = useCallback(
+    (groupId: string): string[] => {
+      const result: string[] = [];
+      for (const l of layers) {
+        if (l.parentGroupId === groupId) {
+          if (l.type === 'group') {
+            result.push(...getGroupChildIds(l.id));
+          } else {
+            result.push(l.id);
+          }
+        }
+      }
+      return result;
+    },
+    [layers],
+  );
+
+  // ---- Selection handler ----
   const handleSelect = useCallback(
     (id: string, event: React.MouseEvent) => {
+      // Check if clicking a group — expand to children
+      const clickedLayer = layers.find((l) => l.id === id);
+      const resolveId = (layerId: string): string[] => {
+        const layer = layers.find((l) => l.id === layerId);
+        if (layer?.type === 'group') {
+          const childIds = getGroupChildIds(layerId);
+          return childIds.length > 0 ? childIds : [layerId];
+        }
+        return [layerId];
+      };
+
       if (event.shiftKey) {
-        // Shift+click: range select between lastSelected and current
         if (lastSelectedRef.current) {
           const lastIdx = visibleLayers.findIndex((l) => l.id === lastSelectedRef.current);
           const currentIdx = visibleLayers.findIndex((l) => l.id === id);
           if (lastIdx !== -1 && currentIdx !== -1) {
             const start = Math.min(lastIdx, currentIdx);
             const end = Math.max(lastIdx, currentIdx);
-            const idsToSelect = visibleLayers.slice(start, end + 1).map((l) => l.id);
-            useDocumentStore.setState({ selectedLayerIds: idsToSelect });
+            const idsToSelect: string[] = [];
+            for (const l of visibleLayers.slice(start, end + 1)) {
+              idsToSelect.push(...resolveId(l.id));
+            }
+            useDocumentStore.setState({ selectedLayerIds: [...new Set(idsToSelect)] });
             return;
           }
         }
         toggleSelection(id);
       } else if (event.ctrlKey || event.metaKey) {
-        toggleSelection(id);
+        // For ctrl+click on group, toggle all children
+        if (clickedLayer?.type === 'group') {
+          const childIds = getGroupChildIds(id);
+          const currentIds = useDocumentStore.getState().selectedLayerIds;
+          const allSelected = childIds.every((cid) => currentIds.includes(cid));
+          if (allSelected) {
+            // Remove all children from selection
+            useDocumentStore.setState({
+              selectedLayerIds: currentIds.filter((sid) => !childIds.includes(sid)),
+            });
+          } else {
+            // Add all children to selection
+            useDocumentStore.setState({
+              selectedLayerIds: [...new Set([...currentIds, ...childIds])],
+            });
+          }
+        } else {
+          toggleSelection(id);
+        }
       } else {
-        selectLayer(id);
+        const resolved = resolveId(id);
+        useDocumentStore.setState({ selectedLayerIds: resolved });
       }
       lastSelectedRef.current = id;
     },
-    [visibleLayers, selectLayer, toggleSelection],
+    [layers, visibleLayers, toggleSelection, getGroupChildIds],
   );
 
-  // ---- Visibility toggle (group: toggle all descendants) ----
+  // ---- Visibility toggle ----
   const handleToggleVisibility = useCallback(
     (id: string) => {
       takeSnapshot();
@@ -241,16 +248,12 @@ export function LayersTab(_props: LayersTabProps) {
       if (!layer) return;
       const newVisible = !layer.visible;
       updateLayer(id, { visible: newVisible });
-
-      // If group, toggle all descendants too
       if (layer.type === 'group') {
         const toggleDescendants = (parentId: string) => {
           for (const child of layers) {
             if (child.parentGroupId === parentId) {
               updateLayer(child.id, { visible: newVisible });
-              if (child.type === 'group') {
-                toggleDescendants(child.id);
-              }
+              if (child.type === 'group') toggleDescendants(child.id);
             }
           }
         };
@@ -290,91 +293,178 @@ export function LayersTab(_props: LayersTabProps) {
     [updateLayer, takeSnapshot],
   );
 
-  // ---- Drag-and-drop ----
+  // ---- Drag-and-drop (Photoshop-style) ----
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveId(event.active.id as string);
   }, []);
 
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      setActiveId(null);
-      const { active, over } = event;
-      if (!over || active.id === over.id) return;
-
-      takeSnapshot();
-
-      const oldIndex = layers.findIndex((l) => l.id === active.id);
-      const overIndex = layers.findIndex((l) => l.id === over.id);
-
-      if (oldIndex === -1 || overIndex === -1) return;
-
-      // Check max depth (2) enforcement
-      const movingLayer = layers[oldIndex];
-      const targetLayer = layers[overIndex];
-
-      // If dropping into a group (and target is at depth < 2), reparent
-      if (
-        targetLayer.type === 'group' &&
-        targetLayer.depth < 2 &&
-        movingLayer.depth <= 2
-      ) {
-        // Reparent: set parentGroupId to target, update depth
-        const newDepth = targetLayer.depth + 1;
-        if (newDepth <= 2) {
-          updateLayer(movingLayer.id, {
-            parentGroupId: targetLayer.id,
-            depth: newDepth,
-          });
-          // Add to group's childIds
-          if (!targetLayer.childIds.includes(movingLayer.id)) {
-            updateLayer(targetLayer.id, {
-              childIds: [...targetLayer.childIds, movingLayer.id],
-            });
-          }
-        }
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      const { over } = event;
+      if (!over) {
+        setDropFeedback(null);
+        return;
       }
 
-      // Always reorder by index
-      moveLayer(active.id as string, overIndex);
+      const data = over.data.current as LayerDropData | undefined;
+      if (!data || data.layerId === BOTTOM_DROP_ID) {
+        setDropFeedback(null);
+        return;
+      }
+
+      const zone = computeDropZone(
+        pointerYRef.current,
+        over.rect,
+        data.isGroup,
+        data.isExpanded,
+      );
+
+      setDropFeedback({
+        layerId: data.layerId,
+        zone,
+        rect: over.rect,
+      });
     },
-    [layers, moveLayer, updateLayer, takeSnapshot],
+    [],
   );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      setActiveId(null);
+      setDropFeedback(null);
+
+      if (!over) return;
+
+      const data = over.data.current as LayerDropData | undefined;
+      if (!data) return;
+
+      const activeLayer = layers.find((l) => l.id === active.id);
+      if (!activeLayer) return;
+
+      // Bottom drop zone: move to the very end, outside any group
+      if (data.layerId === BOTTOM_DROP_ID) {
+        takeSnapshot();
+        if (activeLayer.parentGroupId) {
+          const oldParent = layers.find((l) => l.id === activeLayer.parentGroupId);
+          if (oldParent) {
+            updateLayer(oldParent.id, {
+              childIds: oldParent.childIds.filter((cid) => cid !== activeLayer.id),
+            });
+          }
+          updateLayer(activeLayer.id, { parentGroupId: null, depth: 0 });
+        }
+        moveLayerSubtree(activeLayer.id, layers.length);
+        return;
+      }
+
+      const overLayer = layers.find((l) => l.id === data.layerId);
+      if (!overLayer) return;
+      if (activeLayer.id === overLayer.id) return;
+
+      const zone = computeDropZone(
+        pointerYRef.current,
+        over.rect,
+        data.isGroup,
+        data.isExpanded,
+      );
+
+      const intent = resolveDropIntent(activeLayer, overLayer, zone, layers);
+      if (!intent) return;
+
+      takeSnapshot();
+      executeDropIntent(intent, activeLayer, layers, updateLayer, moveLayerSubtree);
+    },
+    [layers, updateLayer, moveLayerSubtree, takeSnapshot],
+  );
+
+  const handleDragCancel = useCallback(() => {
+    setActiveId(null);
+    setDropFeedback(null);
+  }, []);
+
+  // ---- Insert context (above selected layer) ----
+  const getInsertContext = useCallback(() => {
+    if (selectedLayerIds.length === 0)
+      return { index: layers.length, parentGroupId: null as string | null, depth: 0 };
+    const selId = selectedLayerIds[0];
+    const selIdx = layers.findIndex((l) => l.id === selId);
+    const selLayer = layers[selIdx];
+    if (!selLayer)
+      return { index: layers.length, parentGroupId: null as string | null, depth: 0 };
+    return {
+      index: selIdx,
+      parentGroupId: selLayer.parentGroupId,
+      depth: selLayer.depth,
+    };
+  }, [selectedLayerIds, layers]);
 
   // ---- Footer button actions ----
   const handleNewLayer = useCallback(() => {
     takeSnapshot();
     const name = getUniqueLayerName('Layer', layers);
-    const newLayer = createDefaultLayer({ name, type: 'image' });
-    addLayer(newLayer);
+    const ctx = getInsertContext();
+    const newLayer = createDefaultLayer({
+      name,
+      type: 'image',
+      parentGroupId: ctx.parentGroupId,
+      depth: ctx.depth,
+    });
+    addLayerAtIndex(newLayer, ctx.index);
+    if (ctx.parentGroupId) {
+      const parentGroup = layers.find((l) => l.id === ctx.parentGroupId);
+      if (parentGroup && !parentGroup.childIds.includes(newLayer.id)) {
+        updateLayer(ctx.parentGroupId, {
+          childIds: [...parentGroup.childIds, newLayer.id],
+        });
+      }
+    }
     selectLayer(newLayer.id);
-  }, [layers, addLayer, selectLayer, takeSnapshot]);
+  }, [layers, addLayerAtIndex, selectLayer, updateLayer, takeSnapshot, getInsertContext]);
 
   const handleNewGroup = useCallback(() => {
     takeSnapshot();
     const name = getUniqueLayerName('Group', layers);
+    const ctx = getInsertContext();
     const newGroup = createDefaultLayer({
       name,
       type: 'group',
       groupColor: '#888888',
+      parentGroupId: ctx.parentGroupId,
+      depth: ctx.depth,
     });
-    addLayer(newGroup);
+    addLayerAtIndex(newGroup, ctx.index);
+    if (ctx.parentGroupId) {
+      const parentGroup = layers.find((l) => l.id === ctx.parentGroupId);
+      if (parentGroup && !parentGroup.childIds.includes(newGroup.id)) {
+        updateLayer(ctx.parentGroupId, {
+          childIds: [...parentGroup.childIds, newGroup.id],
+        });
+      }
+    }
     selectLayer(newGroup.id);
-  }, [layers, addLayer, selectLayer, takeSnapshot]);
+  }, [layers, addLayerAtIndex, selectLayer, updateLayer, takeSnapshot, getInsertContext]);
 
   const handleDuplicate = useCallback(() => {
     if (selectedLayerIds.length === 0) return;
     takeSnapshot();
-
+    const currentLayers = useDocumentStore.getState().project.layers;
     for (const selectedId of selectedLayerIds) {
-      const layer = layers.find((l) => l.id === selectedId);
+      const layer = currentLayers.find((l) => l.id === selectedId);
       if (!layer) continue;
       const clone = cloneLayer(layer);
-      clone.name = getUniqueLayerName(layer.name, layers);
+      clone.name = getUniqueLayerName(layer.name, currentLayers);
       clone.x += 20;
       clone.y += 20;
-      addLayer(clone);
+      // Insert above the source layer
+      const sourceIdx = useDocumentStore.getState().project.layers.findIndex((l) => l.id === layer.id);
+      if (sourceIdx !== -1) {
+        addLayerAtIndex(clone, sourceIdx);
+      } else {
+        addLayer(clone);
+      }
     }
-  }, [selectedLayerIds, layers, addLayer, takeSnapshot]);
+  }, [selectedLayerIds, addLayer, addLayerAtIndex, takeSnapshot]);
 
   const handleDelete = useCallback(() => {
     if (selectedLayerIds.length === 0) return;
@@ -413,12 +503,9 @@ export function LayersTab(_props: LayersTabProps) {
       isExpanded: true,
       childIds: [...selectedLayerIds],
     });
-
-    // Set parentGroupId and depth on selected layers
     for (const id of selectedLayerIds) {
       updateLayer(id, { parentGroupId: newGroup.id, depth: 1 });
     }
-
     addLayer(newGroup);
     selectLayer(newGroup.id);
   }, [selectedLayerIds, layers, addLayer, selectLayer, updateLayer, takeSnapshot]);
@@ -429,21 +516,28 @@ export function LayersTab(_props: LayersTabProps) {
     const group = layers.find((l) => l.id === groupId);
     if (!group || group.type !== 'group') return;
     takeSnapshot();
-
-    // Detach all children
     for (const childId of group.childIds) {
       updateLayer(childId, { parentGroupId: null, depth: 0 });
     }
-
     removeLayer(groupId);
   }, [selectedLayerIds, layers, updateLayer, removeLayer, takeSnapshot]);
 
-  const handleExport = useCallback(() => {
-    // Placeholder: export functionality to be wired later
-  }, []);
+  const handleExport = useCallback(() => {}, []);
 
   // Active drag layer for overlay
   const activeLayer = activeId ? layers.find((l) => l.id === activeId) : null;
+
+  // Compute drop indicator position relative to the list container
+  const indicatorPos = useMemo(() => {
+    if (!dropFeedback || !listContainerRef.current) return null;
+    const containerRect = listContainerRef.current.getBoundingClientRect();
+    return {
+      top: dropFeedback.rect.top - containerRect.top,
+      width: containerRect.width,
+      height: dropFeedback.rect.bottom - dropFeedback.rect.top,
+      zone: dropFeedback.zone,
+    };
+  }, [dropFeedback]);
 
   return (
     <div
@@ -451,12 +545,13 @@ export function LayersTab(_props: LayersTabProps) {
       className="flex h-full flex-col"
       style={{ backgroundColor: 'var(--panel-bg)' }}
     >
-      {/* ---- Scrollable layer list with DnD ---- */}
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={pointerWithin}
         onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
         <ScrollArea.Root className="min-h-0 flex-1" type="auto">
           <ScrollArea.Viewport className="h-full w-full">
@@ -469,28 +564,39 @@ export function LayersTab(_props: LayersTabProps) {
                 No layers
               </div>
             ) : (
-              <SortableContext
-                items={layerIds}
-                strategy={verticalListSortingStrategy}
-              >
-                <div className="flex flex-col py-0.5">
-                  {visibleLayers.map((layer, index) => (
-                    <SortableLayerRow
-                      key={layer.id}
-                      layer={layer}
-                      allLayers={layers}
-                      isSelected={selectedLayerIds.includes(layer.id)}
-                      onSelect={handleSelect}
-                      onToggleVisibility={handleToggleVisibility}
-                      onToggleLock={handleToggleLock}
-                      onToggleExpand={handleToggleExpand}
-                      onRename={handleRename}
-                      isLast={index === visibleLayers.length - 1}
-                      nextDepth={visibleLayers[index + 1]?.depth ?? 0}
-                    />
-                  ))}
-                </div>
-              </SortableContext>
+              <div ref={listContainerRef} className="relative flex flex-col py-0.5">
+                {visibleLayers.map((layer, index) => {
+                  // Group is "selected" if any of its children are selected
+                  const isLayerSelected = layer.type === 'group'
+                    ? getGroupChildIds(layer.id).some((cid) => selectedLayerIds.includes(cid))
+                    : selectedLayerIds.includes(layer.id);
+                  return (
+                  <DraggableLayerRow
+                    key={layer.id}
+                    layer={layer}
+                    isSelected={isLayerSelected}
+                    onSelect={handleSelect}
+                    onToggleVisibility={handleToggleVisibility}
+                    onToggleLock={handleToggleLock}
+                    onToggleExpand={handleToggleExpand}
+                    onRename={handleRename}
+                    isLast={index === visibleLayers.length - 1}
+                    nextDepth={visibleLayers[index + 1]?.depth ?? 0}
+                  />
+                  );
+                })}
+                {/* Bottom drop zone — drop here to place at the very bottom */}
+                <BottomDropZone isActive={activeId !== null} />
+                {/* Drop indicator overlay */}
+                {activeId && indicatorPos && (
+                  <DropIndicator
+                    top={indicatorPos.top}
+                    width={indicatorPos.width}
+                    height={indicatorPos.height}
+                    zone={indicatorPos.zone}
+                  />
+                )}
+              </div>
             )}
           </ScrollArea.Viewport>
           <ScrollArea.Scrollbar
@@ -504,7 +610,7 @@ export function LayersTab(_props: LayersTabProps) {
           </ScrollArea.Scrollbar>
         </ScrollArea.Root>
 
-        {/* Drag overlay */}
+        {/* Drag overlay (floating preview) */}
         <DragOverlay>
           {activeLayer ? (
             <div
@@ -525,7 +631,7 @@ export function LayersTab(_props: LayersTabProps) {
         </DragOverlay>
       </DndContext>
 
-      {/* ---- Footer bar ---- */}
+      {/* Footer bar */}
       <LayerFooterBar
         onExport={handleExport}
         onNewLayer={handleNewLayer}

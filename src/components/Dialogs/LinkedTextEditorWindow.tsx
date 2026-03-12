@@ -42,7 +42,7 @@ export function LinkedTextEditorWindow({
   const [layerFontSizes, setLayerFontSizes] = useState<Record<string, number>>({});
   const [layerWSqueeze, setLayerWSqueeze] = useState<Record<string, number>>({});
 
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Sync from props when dialog opens

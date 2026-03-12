@@ -5,6 +5,7 @@ import {
   createDefaultLayer,
   createDefaultTextProperties,
   createDefaultShapeProperties,
+  getUniqueLayerName,
 } from '../types/index';
 
 function hasSelection(): boolean {
@@ -42,7 +43,7 @@ export const addText: Command = {
     store.pushUndo();
     const layer = createDefaultLayer({
       type: 'text',
-      name: 'Text Layer',
+      name: getUniqueLayerName('Text Layer', store.project.layers),
       width: 200,
       height: 50,
       textProperties: createDefaultTextProperties(),
@@ -64,7 +65,7 @@ export const addShape: Command = {
     props.shapeType = shapeType;
     const layer = createDefaultLayer({
       type: 'shape',
-      name: `Shape (${shapeType})`,
+      name: getUniqueLayerName(`Shape (${shapeType})`, store.project.layers),
       width: 100,
       height: 100,
       shapeProperties: props,
@@ -84,7 +85,7 @@ export const addNewLayer: Command = {
     store.pushUndo();
     const layer = createDefaultLayer({
       type: 'image',
-      name: 'New Layer',
+      name: getUniqueLayerName('New Layer', store.project.layers),
     });
     store.addLayer(layer);
     store.selectLayer(layer.id);
@@ -101,7 +102,7 @@ export const addNewGroup: Command = {
     store.pushUndo();
     const layer = createDefaultLayer({
       type: 'group',
-      name: 'New Group',
+      name: getUniqueLayerName('New Group', store.project.layers),
       width: 0,
       height: 0,
     });
@@ -184,7 +185,7 @@ export const addDateStamp: Command = {
     textProps.text = stamp;
     const layer = createDefaultLayer({
       type: 'text',
-      name: 'Date Stamp',
+      name: getUniqueLayerName('Date Stamp', store.project.layers),
       width: 200,
       height: 40,
       textProperties: textProps,

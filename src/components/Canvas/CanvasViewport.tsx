@@ -21,6 +21,7 @@ import {
   createDefaultLayer,
   createDefaultShapeProperties,
   cloneLayer,
+  getUniqueLayerName,
 } from '../../types/index';
 import type { ShapeType } from '../../types/enums';
 import type { LayerModel } from '../../types/LayerModel';
@@ -98,6 +99,7 @@ export function CanvasViewport({
   const storeUpdateLayer = useDocumentStore((s) => s.updateLayer);
 
   const storeAddLayer = useDocumentStore((s) => s.addLayer);
+  const storeAddLayerAtIndex = useDocumentStore((s) => s.addLayerAtIndex);
   const storePushUndo = useDocumentStore((s) => s.pushUndo);
 
   const takeSnapshot = useUndoRedoStore((s) => s.takeSnapshot);
@@ -189,9 +191,11 @@ export function CanvasViewport({
         7: 'Heptagon', 8: 'Octagon', 9: 'Nonagon', 10: 'Decagon',
         11: 'Hendecagon', 12: 'Dodecagon',
       };
-      const shapeName = isPolygon
+      const baseName = isPolygon
         ? (POLYGON_NAMES[sides] ?? `Polygon (${sides})`)
         : `Shape (${selectedShapeType})`;
+      const layers = useDocumentStore.getState().project.layers;
+      const shapeName = getUniqueLayerName(baseName, layers);
 
       const layer = createDefaultLayer({
         type: 'shape',
@@ -218,10 +222,17 @@ export function CanvasViewport({
     (layer: LayerModel): LayerModel | null => {
       storePushUndo();
       const clone = cloneLayer(layer);
-      storeAddLayer(clone);
+      // Insert above the source layer
+      const layers = useDocumentStore.getState().project.layers;
+      const sourceIdx = layers.findIndex((l) => l.id === layer.id);
+      if (sourceIdx !== -1) {
+        storeAddLayerAtIndex(clone, sourceIdx);
+      } else {
+        storeAddLayer(clone);
+      }
       return clone;
     },
-    [storePushUndo, storeAddLayer],
+    [storePushUndo, storeAddLayer, storeAddLayerAtIndex],
   );
 
   // ---------------------------------------------------------------------------
@@ -278,9 +289,36 @@ export function CanvasViewport({
   const computedSelectedBounds = useMemo((): Bounds | null => {
     if (storeSelectedLayerIds.length === 0) return null;
 
+    // Expand group selections: replace group IDs with their children's bounds
+    const effectiveIds = new Set<string>();
+    for (const id of storeSelectedLayerIds) {
+      const layer = layers.find((l) => l.id === id);
+      if (!layer) continue;
+      if (layer.type === 'group') {
+        // Add all children (recursively) instead of the group itself
+        const addChildren = (parentId: string) => {
+          for (const child of layers) {
+            if (child.parentGroupId === parentId) {
+              if (child.type === 'group') {
+                addChildren(child.id);
+              } else {
+                effectiveIds.add(child.id);
+              }
+            }
+          }
+        };
+        addChildren(id);
+      } else {
+        effectiveIds.add(id);
+      }
+    }
+
+    // Empty group(s) with no children → no handles
+    if (effectiveIds.size === 0) return null;
+
     const boundsMap = new Map<string, import('../../hooks/useSelectionManager').LayerBounds>();
     for (const layer of layers) {
-      if (storeSelectedLayerIds.includes(layer.id)) {
+      if (effectiveIds.has(layer.id)) {
         boundsMap.set(layer.id, {
           id: layer.id,
           x: layer.x,
@@ -295,9 +333,9 @@ export function CanvasViewport({
     const bounds = selectionManager.getSelectedBounds(boundsMap);
     if (!bounds) return null;
 
-    // For single selection, include rotation and anchor
-    if (storeSelectedLayerIds.length === 1) {
-      const layer = layers.find((l) => l.id === storeSelectedLayerIds[0]);
+    // For single non-group selection, include rotation and anchor
+    if (storeSelectedLayerIds.length === 1 && effectiveIds.size === 1) {
+      const layer = layers.find((l) => l.id === [...effectiveIds][0]);
       if (layer) {
         const ax = layer.anchorX ?? 0.5;
         const ay = layer.anchorY ?? 0.5;
@@ -310,7 +348,6 @@ export function CanvasViewport({
             layer.height,
             layer.shapeProperties.polygonSides,
           );
-          // Only use tight bounds if they differ from the full layer bounds
           if (
             tight.x > 0 ||
             tight.y > 0 ||
@@ -324,7 +361,6 @@ export function CanvasViewport({
               width: tight.width,
               height: tight.height,
               rotation: layer.rotation,
-              // Remap anchor so rotation pivot stays at original layer anchor
               anchorX: (layer.width * ax - tight.x) / tight.width,
               anchorY: (layer.height * ay - tight.y) / tight.height,
             };

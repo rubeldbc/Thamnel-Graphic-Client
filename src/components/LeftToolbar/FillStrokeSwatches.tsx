@@ -10,11 +10,11 @@ export interface FillStrokeSwatchesProps {
 }
 
 /**
- * Photoshop-style overlapping colour swatches.
+ * Photoshop-style overlapping colour swatches with checkerboard behind
+ * to indicate transparency.
  *
  * - Fill swatch: 24x24, sits behind (top-left).
  * - Stroke swatch: 18x18, in front at bottom-right.
- * - Both have a thin #555 border.
  */
 export function FillStrokeSwatches({
   fillColor = '#FFFFFF',
@@ -40,12 +40,32 @@ export function FillStrokeSwatches({
           left: 0,
           width: 24,
           height: 24,
-          backgroundColor: fillColor,
-          border: '1px solid #555',
           borderRadius: 2,
           zIndex: 1,
+          padding: 0,
+          overflow: 'hidden',
         }}
-      />
+      >
+        {/* Checkerboard */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background:
+              'repeating-conic-gradient(#808080 0% 25%, #c0c0c0 0% 50%) 50% / 6px 6px',
+          }}
+        />
+        {/* Color */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            backgroundColor: fillColor,
+            border: '1.5px solid #555',
+            borderRadius: 2,
+          }}
+        />
+      </button>
 
       {/* Stroke swatch (in front, bottom-right) */}
       <button
@@ -59,12 +79,32 @@ export function FillStrokeSwatches({
           right: 0,
           width: 18,
           height: 18,
-          backgroundColor: strokeColor,
-          border: '1px solid #555',
           borderRadius: 2,
           zIndex: 2,
+          padding: 0,
+          overflow: 'hidden',
         }}
-      />
+      >
+        {/* Checkerboard */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background:
+              'repeating-conic-gradient(#808080 0% 25%, #c0c0c0 0% 50%) 50% / 6px 6px',
+          }}
+        />
+        {/* Color */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            backgroundColor: strokeColor,
+            border: '1.5px solid #555',
+            borderRadius: 2,
+          }}
+        />
+      </button>
     </div>
   );
 }
