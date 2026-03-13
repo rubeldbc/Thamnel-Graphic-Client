@@ -11,7 +11,7 @@ import type { Bounds } from './HandleOverlay';
 import { useUiStore } from '../../stores/uiStore';
 import { useDocumentStore } from '../../stores/documentStore';
 import { useUndoRedoStore } from '../../stores/undoRedoStore';
-import { compositeAllLayers, hasActiveEffects } from '../../engine/compositor';
+import { compositeAllLayers } from '../../engine/compositor';
 import { getShapeTightBounds } from '../../engine/shapeRenderer';
 import { useSelectionManager } from '../../hooks/useSelectionManager';
 import { useSmartGuides } from '../../hooks/useSmartGuides';
@@ -718,15 +718,9 @@ export function CanvasViewport({
     interaction.dragMode !== 'marqueeSelect' &&
     interaction.dragMode !== 'drawShape';
 
-  // The GPU renderer (Rust wgpu+Vello) does not implement per-layer effects
-  // yet (brightness, contrast, blur, etc.). When any visible layer has active
-  // effects, fall back to the CPU compositor which applies them.
-  const layersHaveEffects = useMemo(
-    () => layers.some((l) => l.visible && hasActiveEffects(l)),
-    [layers],
-  );
-
-  const effectiveGpuActive = gpuActive && !isInteracting && !layersHaveEffects;
+  // GPU renderer now handles per-layer effects via WGSL compute shaders
+  // (Phase A.2). No need to fall back to CPU compositor for effects.
+  const effectiveGpuActive = gpuActive && !isInteracting;
 
   // Suppress GPU render dispatches while the CPU compositor is handling
   // interactive rendering — avoids wasting IPC bandwidth during drags.

@@ -18,6 +18,47 @@ use crate::engine::DecodedImage;
 use crate::shape_render;
 use crate::text_render::TextEngine;
 
+/// Convert a thamnel_core BlendMode to a peniko BlendMode (Mix + Compose).
+fn to_peniko_blend(mode: thamnel_core::BlendMode) -> BlendMode {
+    let mix = match mode {
+        thamnel_core::BlendMode::Normal => Mix::Normal,
+        thamnel_core::BlendMode::Multiply => Mix::Multiply,
+        thamnel_core::BlendMode::Darken => Mix::Darken,
+        thamnel_core::BlendMode::ColorBurn => Mix::ColorBurn,
+        thamnel_core::BlendMode::Screen => Mix::Screen,
+        thamnel_core::BlendMode::Lighten => Mix::Lighten,
+        thamnel_core::BlendMode::ColorDodge => Mix::ColorDodge,
+        thamnel_core::BlendMode::LinearDodge => {
+            // LinearDodge = additive blending. Vello doesn't have a Mix variant
+            // for this, so we use Normal mix with Plus compositing below.
+            Mix::Normal
+        }
+        thamnel_core::BlendMode::Overlay => Mix::Overlay,
+        thamnel_core::BlendMode::SoftLight => Mix::SoftLight,
+        thamnel_core::BlendMode::HardLight => Mix::HardLight,
+        thamnel_core::BlendMode::Difference => Mix::Difference,
+        thamnel_core::BlendMode::Exclusion => Mix::Exclusion,
+        thamnel_core::BlendMode::Hue => Mix::Hue,
+        thamnel_core::BlendMode::Saturation => Mix::Saturation,
+        thamnel_core::BlendMode::Color => Mix::Color,
+        thamnel_core::BlendMode::Luminosity => Mix::Luminosity,
+    };
+
+    // LinearDodge uses Plus compositing instead of SrcOver
+    let compose = if matches!(mode, thamnel_core::BlendMode::LinearDodge) {
+        peniko::Compose::Plus
+    } else {
+        peniko::Compose::SrcOver
+    };
+
+    BlendMode::new(mix, compose)
+}
+
+/// Check if a blend mode is non-normal (requires a compositing layer).
+fn needs_blend_layer(mode: thamnel_core::BlendMode) -> bool {
+    !matches!(mode, thamnel_core::BlendMode::Normal)
+}
+
 /// Build the full document scene for rendering.
 pub fn build_document_scene(
     scene: &mut Scene,
@@ -25,6 +66,7 @@ pub fn build_document_scene(
     viewport: &Viewport,
     selection: &SelectionInfo,
     image_cache: &HashMap<String, DecodedImage>,
+    processed_layers: &HashMap<String, DecodedImage>,
     text_engine: &mut TextEngine,
 ) {
     // Canvas background
@@ -56,7 +98,37 @@ pub fn build_document_scene(
             continue;
         }
 
-        render_node(scene, node, viewport_transform, image_cache, text_engine);
+        let blend_mode = node.base.blend_mode;
+        let opacity = node.base.opacity;
+        let use_layer = needs_blend_layer(blend_mode) || opacity < 1.0;
+
+        // If blend mode is non-normal or opacity < 1, wrap in a compositing layer.
+        // This applies the blend mode and opacity to the ENTIRE node as a group.
+        if use_layer {
+            let size = &node.base.size;
+            let node_transform = to_kurbo_affine(&node.base.transform, size);
+            let clip_transform = viewport_transform * node_transform;
+            // Clip rect in node-local space; generous padding for effects/shadows
+            let clip_rect = Rect::new(-size.width, -size.height, size.width * 2.0, size.height * 2.0);
+            scene.push_layer(
+                Fill::NonZero,
+                to_peniko_blend(blend_mode),
+                opacity as f32,
+                clip_transform,
+                &clip_rect,
+            );
+        }
+
+        let id = node.base.identity.id.to_string();
+        if let Some(processed) = processed_layers.get(&id) {
+            render_processed_layer(scene, processed, node, viewport_transform, use_layer);
+        } else {
+            render_node(scene, node, viewport_transform, image_cache, text_engine, use_layer);
+        }
+
+        if use_layer {
+            scene.pop_layer();
+        }
     }
 
     // Render selection gizmos
@@ -66,16 +138,21 @@ pub fn build_document_scene(
 }
 
 /// Render a single node to the scene.
+///
+/// When `in_blend_layer` is true, the node's opacity and blend mode are handled
+/// by the parent compositing layer, so content is drawn at full opacity.
 fn render_node(
     scene: &mut Scene,
     node: &Node,
     viewport_transform: Affine,
     image_cache: &HashMap<String, DecodedImage>,
     text_engine: &mut TextEngine,
+    in_blend_layer: bool,
 ) {
     let base = &node.base;
     let size = &base.size;
-    let opacity = base.opacity;
+    // If we're inside a compositing layer, draw at full opacity (layer handles it)
+    let opacity = if in_blend_layer { 1.0 } else { base.opacity };
 
     // Build the node's local transform
     let node_transform = to_kurbo_affine(&base.transform, size);
@@ -191,6 +268,161 @@ fn render_image(
         scene.pop_layer();
     } else {
         scene.draw_image(&image_brush, image_xform);
+    }
+}
+
+/// Render a pre-processed layer (with effects already applied) as an image.
+///
+/// When `in_blend_layer` is true, opacity is handled by the parent compositing
+/// layer, so the image is drawn at full opacity.
+fn render_processed_layer(
+    scene: &mut Scene,
+    processed: &DecodedImage,
+    node: &Node,
+    viewport_transform: Affine,
+    in_blend_layer: bool,
+) {
+    let base = &node.base;
+    let size = &base.size;
+    let opacity = if in_blend_layer { 1.0 } else { base.opacity };
+
+    let node_transform = to_kurbo_affine(&base.transform, size);
+
+    let flip = if base.flip_horizontal || base.flip_vertical {
+        let sx = if base.flip_horizontal { -1.0 } else { 1.0 };
+        let sy = if base.flip_vertical { -1.0 } else { 1.0 };
+        let cx = size.width / 2.0;
+        let cy = size.height / 2.0;
+        Affine::translate((cx, cy))
+            * Affine::scale_non_uniform(sx, sy)
+            * Affine::translate((-cx, -cy))
+    } else {
+        Affine::IDENTITY
+    };
+
+    let full_transform = viewport_transform * node_transform * flip;
+
+    // Draw the processed pixels as an image
+    let blob: Blob<u8> = processed.rgba.clone().into();
+    let image_data = ImageData {
+        data: blob,
+        format: ImageFormat::Rgba8,
+        alpha_type: ImageAlphaType::Alpha,
+        width: processed.width,
+        height: processed.height,
+    };
+
+    let image_brush = ImageBrush {
+        image: image_data,
+        sampler: ImageSampler::default().with_alpha(opacity as f32),
+    };
+
+    // Scale from processed pixel space to layer local space
+    let sx = size.width / processed.width as f64;
+    let sy = size.height / processed.height as f64;
+    let image_xform = full_transform * Affine::scale_non_uniform(sx, sy);
+
+    scene.draw_image(&image_brush, image_xform);
+}
+
+/// Render a single node to a standalone scene (no viewport transform).
+///
+/// Used by the effect pre-render step to render individual layers to offscreen textures.
+/// The node is rendered at its natural size at position (0, 0).
+pub fn render_single_node(
+    scene: &mut Scene,
+    node: &Node,
+    image_cache: &HashMap<String, DecodedImage>,
+    text_engine: &mut TextEngine,
+) {
+    let base = &node.base;
+    let size = &base.size;
+
+    // Render at identity (no viewport, no position — just content at origin)
+    let flip = if base.flip_horizontal || base.flip_vertical {
+        let sx = if base.flip_horizontal { -1.0 } else { 1.0 };
+        let sy = if base.flip_vertical { -1.0 } else { 1.0 };
+        let cx = size.width / 2.0;
+        let cy = size.height / 2.0;
+        Affine::translate((cx, cy))
+            * Affine::scale_non_uniform(sx, sy)
+            * Affine::translate((-cx, -cy))
+    } else {
+        Affine::IDENTITY
+    };
+
+    match &node.kind {
+        NodeKind::Image(_img_data) => {
+            let id = base.identity.id.to_string();
+            if let Some(decoded) = image_cache.get(&id) {
+                // Render image at natural size, no crop, full opacity (effects handle the rest)
+                let blob: Blob<u8> = decoded.rgba.clone().into();
+                let image_data = ImageData {
+                    data: blob,
+                    format: ImageFormat::Rgba8,
+                    alpha_type: ImageAlphaType::Alpha,
+                    width: decoded.width,
+                    height: decoded.height,
+                };
+                let image_brush = ImageBrush {
+                    image: image_data,
+                    sampler: ImageSampler::default(),
+                };
+                let sx = size.width / decoded.width as f64;
+                let sy = size.height / decoded.height as f64;
+                let xform = flip * Affine::scale_non_uniform(sx, sy);
+
+                // Apply crop if any
+                let crop_left = base.crop_left;
+                let crop_top = base.crop_top;
+                let crop_right = base.crop_right;
+                let crop_bottom = base.crop_bottom;
+                let has_crop = crop_left > 0.0 || crop_top > 0.0 || crop_right > 0.0 || crop_bottom > 0.0;
+
+                if has_crop {
+                    let draw_w = size.width - crop_left - crop_right;
+                    let draw_h = size.height - crop_top - crop_bottom;
+                    if draw_w > 0.0 && draw_h > 0.0 {
+                        let clip_rect = Rect::new(crop_left, crop_top, crop_left + draw_w, crop_top + draw_h);
+                        scene.push_layer(
+                            Fill::NonZero,
+                            BlendMode::new(Mix::Normal, peniko::Compose::SrcOver),
+                            1.0,
+                            Affine::IDENTITY,
+                            &clip_rect,
+                        );
+                        scene.draw_image(&image_brush, xform);
+                        scene.pop_layer();
+                    }
+                } else {
+                    scene.draw_image(&image_brush, xform);
+                }
+            }
+        }
+        NodeKind::Text(text_props) => {
+            let buffer = text_engine.layout_text(text_props, size.width);
+            crate::text_render::render_text_to_scene(
+                scene,
+                text_props,
+                &buffer,
+                text_engine,
+                flip,
+                1.0, // full opacity — compositor handles layer opacity
+                size.width,
+                size.height,
+            );
+        }
+        NodeKind::Shape(shape_props) => {
+            shape_render::render_shape(
+                scene,
+                shape_props,
+                size.width,
+                size.height,
+                flip,
+                1.0, // full opacity
+            );
+        }
+        NodeKind::Group(_) => {}
     }
 }
 

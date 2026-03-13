@@ -114,11 +114,17 @@ pub fn render_frame(
 
     let node_count = doc.nodes.len() as u32;
 
-    // --- Pipeline stages with individual timing ---
+    // --- Full pipeline: prepare → effects → build → render → readback ---
     let t_prepare = Instant::now();
     engine.prepare_resources(&doc).map_err(|e| {
         eprintln!("[render_bridge] prepare_resources failed: {e}");
         format!("Prepare failed: {e}")
+    })?;
+
+    // Pre-render layers with effects (GPU compute shaders)
+    engine.pre_render_effects(&doc).map_err(|e| {
+        eprintln!("[render_bridge] pre_render_effects failed: {e}");
+        format!("Effects failed: {e}")
     })?;
     let prepare_us = t_prepare.elapsed().as_micros() as u32;
 
@@ -243,11 +249,17 @@ fn render_frame_bin_inner(
 
     let node_count = doc.nodes.len() as u32;
 
-    // --- Pipeline stages with individual timing ---
+    // --- Full pipeline: prepare → effects → build → render → readback ---
     let t_prepare = Instant::now();
     engine.prepare_resources(&doc).map_err(|e| {
         eprintln!("[render_bridge] prepare_resources failed: {e}");
         format!("Prepare failed: {e}")
+    })?;
+
+    // Pre-render layers with effects (GPU compute shaders)
+    engine.pre_render_effects(&doc).map_err(|e| {
+        eprintln!("[render_bridge] pre_render_effects failed: {e}");
+        format!("Effects failed: {e}")
     })?;
     let prepare_us = t_prepare.elapsed().as_micros() as u32;
 

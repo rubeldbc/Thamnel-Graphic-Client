@@ -5,6 +5,7 @@ import type { DocumentModel } from '../types/document-model';
 import type { Node } from '../types/node';
 import { legacyProjectToDocument } from '../types/compat';
 import { setDocument as rustSetDocument } from '../bridge/documentBridge';
+import { invalidateLayer } from '../engine/layerRenderer';
 import { dlog } from './debugStore';
 
 export interface DocumentState {
@@ -150,6 +151,8 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
   removeLayer: (layerId) => {
     const layer = get().project.layers.find((l) => l.id === layerId);
     dlog.imageInfo(`Layer removed: "${layer?.name ?? '?'}" (${layerId.slice(0, 8)})`);
+    // Evict from TS render cache to prevent stale references
+    invalidateLayer(layerId);
     set((state) => ({
       project: {
         ...state.project,

@@ -6,6 +6,7 @@
 pub mod backend;
 pub mod compositor;
 pub mod conversions;
+pub mod effect_pipeline;
 pub mod engine;
 pub mod export;
 pub mod hit_test;

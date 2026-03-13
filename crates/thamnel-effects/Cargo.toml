@@ -1,0 +1,10 @@
+[package]
+name = "thamnel-effects"
+version = "0.1.0"
+edition = "2021"
+description = "Effect definitions + WGSL shader kernels for Thamnel Graphics Editor"
+
+[dependencies]
+thamnel-core = { path = "../thamnel-core" }
+wgpu = "27"
+log = "0.4"

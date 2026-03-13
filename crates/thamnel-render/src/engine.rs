@@ -13,6 +13,7 @@ use thamnel_core::Document;
 
 use crate::backend::{RenderBackend, RenderError, SelectionInfo, Viewport};
 use crate::compositor;
+use crate::effect_pipeline::EffectPipeline;
 use crate::text_render::TextEngine;
 
 /// The main render engine that owns wgpu device/queue and Vello renderer.
@@ -23,8 +24,13 @@ pub struct RenderEngine {
     scene: Scene,
     /// Current render target texture (recreated on viewport resize).
     target_texture: Option<Texture>,
+    /// Requested render dimensions (set by build_scene, used by render/readback).
     target_width: u32,
     target_height: u32,
+    /// Actual dimensions of the allocated target texture (may differ from target_width/height
+    /// between build_scene and render calls — e.g., after export at different resolution).
+    tex_actual_width: u32,
+    tex_actual_height: u32,
     /// Reusable readback buffer (recreated on viewport resize).
     readback_buffer: Option<wgpu::Buffer>,
     readback_buffer_size: u64,
@@ -32,6 +38,10 @@ pub struct RenderEngine {
     image_cache: HashMap<String, DecodedImage>,
     /// Text layout engine.
     text_engine: TextEngine,
+    /// GPU effect pipeline for per-layer compute shader effects.
+    effect_pipeline: EffectPipeline,
+    /// Pre-rendered layers with effects applied (layer ID → processed pixels).
+    processed_layers: HashMap<String, DecodedImage>,
 }
 
 /// Decoded image data stored in cache.
@@ -75,6 +85,7 @@ impl RenderEngine {
         .map_err(|e| RenderError::Vello(e.to_string()))?;
 
         let text_engine = TextEngine::new();
+        let effect_pipeline = EffectPipeline::new(&device);
 
         Ok(Self {
             device,
@@ -84,10 +95,14 @@ impl RenderEngine {
             target_texture: None,
             target_width: 0,
             target_height: 0,
+            tex_actual_width: 0,
+            tex_actual_height: 0,
             readback_buffer: None,
             readback_buffer_size: 0,
             image_cache: HashMap::new(),
             text_engine,
+            effect_pipeline,
+            processed_layers: HashMap::new(),
         })
     }
 
@@ -96,18 +111,24 @@ impl RenderEngine {
         pollster::block_on(Self::new())
     }
 
-    /// Ensure the render target texture matches the viewport dimensions.
+    /// Ensure the render target texture matches the requested dimensions.
+    ///
+    /// Compares against the ACTUAL texture dimensions (not target_width/height
+    /// which may have been updated by build_scene before render is called).
     fn ensure_target(&mut self, width: u32, height: u32) {
-        if self.target_width == width && self.target_height == height && self.target_texture.is_some()
+        if self.tex_actual_width == width && self.tex_actual_height == height && self.target_texture.is_some()
         {
             return;
         }
 
+        let w = width.max(1);
+        let h = height.max(1);
+
         let texture = self.device.create_texture(&TextureDescriptor {
             label: Some("thamnel_render_target"),
             size: wgpu::Extent3d {
-                width: width.max(1),
-                height: height.max(1),
+                width: w,
+                height: h,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -121,13 +142,189 @@ impl RenderEngine {
         });
 
         self.target_texture = Some(texture);
-        self.target_width = width;
-        self.target_height = height;
+        self.tex_actual_width = w;
+        self.tex_actual_height = h;
     }
 
     /// Get a reference to the text engine for external use.
     pub fn text_engine_mut(&mut self) -> &mut TextEngine {
         &mut self.text_engine
+    }
+
+    /// Pre-render layers that have active effects.
+    ///
+    /// For each layer with effects:
+    /// 1. Build a Vello scene with just that layer (transparent background)
+    /// 2. Render it to an offscreen texture
+    /// 3. Apply GPU effect chain via compute shaders
+    /// 4. Store processed pixels for the compositor to use as an image
+    pub fn pre_render_effects(&mut self, doc: &Document) -> Result<(), RenderError> {
+        self.processed_layers.clear();
+
+        for node in &doc.nodes {
+            if !node.base.visible {
+                continue;
+            }
+
+            let has_effects = thamnel_core::effects::has_active_effects(&node.base.effects);
+            let has_color_adj = {
+                let ca = &node.base.color_adjustments;
+                ca.temperature != 0.0
+                    || ca.tint != 0.0
+                    || ca.exposure != 0.0
+                    || ca.highlights != 0.0
+                    || ca.shadows != 0.0
+            };
+
+            if !has_effects && !has_color_adj {
+                continue;
+            }
+
+            let id = node.base.identity.id.to_string();
+            let w = node.base.size.width.max(1.0) as u32;
+            let h = node.base.size.height.max(1.0) as u32;
+
+            if w == 0 || h == 0 || w > 8192 || h > 8192 {
+                continue;
+            }
+
+            // Process each layer independently — if one fails, skip it and
+            // let the compositor render it without effects instead of crashing.
+            match self.pre_render_single_layer(node, &id, w, h) {
+                Ok(processed) => {
+                    self.processed_layers.insert(id, processed);
+                }
+                Err(e) => {
+                    log::warn!("Effect pre-render failed for layer {}: {e}", &id[..8.min(id.len())]);
+                    // Layer will be rendered without effects by the compositor
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Pre-render a single layer with effects. Separated to isolate failures.
+    fn pre_render_single_layer(
+        &mut self,
+        node: &thamnel_core::node::Node,
+        _id: &str,
+        w: u32,
+        h: u32,
+    ) -> Result<DecodedImage, RenderError> {
+        // Step 1: Build a mini scene with just this layer (no viewport transform)
+        let mut layer_scene = Scene::new();
+        compositor::render_single_node(
+            &mut layer_scene,
+            node,
+            &self.image_cache,
+            &mut self.text_engine,
+        );
+
+        // Step 2: Render the mini scene to an offscreen texture
+        let offscreen_tex = self.device.create_texture(&TextureDescriptor {
+            label: Some("effect_layer_offscreen"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::STORAGE_BINDING
+                | TextureUsages::COPY_SRC
+                | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+
+        let offscreen_view = offscreen_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        self.renderer
+            .render_to_texture(
+                &self.device,
+                &self.queue,
+                &layer_scene,
+                &offscreen_view,
+                &RenderParams {
+                    base_color: vello::peniko::Color::from_rgba8(0, 0, 0, 0),
+                    width: w,
+                    height: h,
+                    antialiasing_method: AaConfig::Area,
+                },
+            )
+            .map_err(|e| RenderError::Vello(format!("{e:?}")))?;
+
+        // Step 3: Read back the unprocessed layer pixels
+        let bytes_per_row = (w * 4 + 255) & !255;
+        let readback_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("effect_layer_readback"),
+            size: (bytes_per_row * h) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("effect_layer_readback_enc"),
+        });
+        encoder.copy_texture_to_buffer(
+            offscreen_tex.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buf,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = readback_buf.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+        let _ = self.device.poll(PollType::wait_indefinitely());
+        rx.recv()
+            .map_err(|e| RenderError::Readback(e.to_string()))?
+            .map_err(|e| RenderError::Readback(e.to_string()))?;
+
+        let data = slice.get_mapped_range();
+        let mut layer_pixels = Vec::with_capacity((w * h * 4) as usize);
+        for row in 0..h {
+            let start = (row * bytes_per_row) as usize;
+            let end = start + (w * 4) as usize;
+            layer_pixels.extend_from_slice(&data[start..end]);
+        }
+        drop(data);
+
+        // Step 4: Build effect pass list and apply GPU effects
+        let passes = thamnel_effects::build_effect_passes(
+            &node.base.effects,
+            &node.base.color_adjustments,
+            w,
+            h,
+        );
+
+        let processed_pixels = if passes.is_empty() {
+            layer_pixels
+        } else {
+            self.effect_pipeline.apply_effects(
+                &self.device,
+                &self.queue,
+                &layer_pixels,
+                w,
+                h,
+                &passes,
+            )?
+        };
+
+        Ok(DecodedImage {
+            rgba: processed_pixels,
+            width: w,
+            height: h,
+        })
     }
 
     /// Ensure the readback buffer is large enough for the current target.
@@ -214,6 +411,19 @@ impl RenderEngine {
 
 impl RenderBackend for RenderEngine {
     fn prepare_resources(&mut self, doc: &Document) -> Result<(), RenderError> {
+        // Collect current node IDs to detect deleted layers
+        let current_ids: std::collections::HashSet<String> = doc
+            .nodes
+            .iter()
+            .map(|n| n.base.identity.id.to_string())
+            .collect();
+
+        // Evict stale entries from image_cache for deleted layers
+        self.image_cache.retain(|id, _| current_ids.contains(id));
+
+        // Evict stale entries from processed_layers for deleted layers
+        self.processed_layers.retain(|id, _| current_ids.contains(id));
+
         // Pre-decode images that aren't in cache
         for node in &doc.nodes {
             if let thamnel_core::node::NodeKind::Image(ref img_data) = node.kind {
@@ -248,6 +458,7 @@ impl RenderBackend for RenderEngine {
             viewport,
             selection,
             &self.image_cache,
+            &self.processed_layers,
             &mut self.text_engine,
         );
         Ok(())
@@ -363,6 +574,7 @@ impl RenderBackend for RenderEngine {
         self.ensure_target(viewport.width, viewport.height);
         self.ensure_readback_buffer();
         self.prepare_resources(doc)?;
+        self.pre_render_effects(doc)?;
         self.build_scene(doc, viewport, selection)?;
         self.render()?;
         self.readback()
