@@ -8,6 +8,52 @@ The app must compile, launch, and function identically at the end of every phase
 
 ---
 
+## Mandatory Rules
+
+### 1. Test After Every Phase
+
+After completing each phase (0, 1, 2, 3, 4), a **full verification pass** must be run
+before proceeding to the next phase. This includes:
+
+- `cargo test --workspace` — all Rust unit tests pass
+- `cargo clippy --workspace` — zero warnings
+- `npm run build` — TypeScript compiles with zero errors
+- Launch the app and manually verify all existing features still work:
+  - Layer panel: create, delete, rename, reorder, drag-drop, groups, visibility, lock, superLock
+  - Shape drawing: all 27 shapes, polyline line drawing, shift-snap
+  - Selection: click, shift-click, ctrl-click, marquee select
+  - Resize/rotate/move handles
+  - Properties panel: position, size, rotation, opacity, blend mode, effects, crop
+  - Undo/redo
+  - Save/load .rbl files (including loading old-format files)
+  - Image import and export
+  - Smart guides and snapping
+
+**Do NOT start the next phase until every check passes.**
+
+### 2. Code Quality Standards
+
+All code — Rust and TypeScript — must follow these standards at every step:
+
+- **Modular**: Each Rust module (`.rs` file) has a single clear responsibility.
+  No god-files. No 1000-line modules. If a module grows beyond ~300 lines, split it.
+- **Refactored**: No copy-paste duplication. Extract shared logic into helper functions.
+  If the same pattern appears twice, abstract it.
+- **Clean public API**: Each crate/module exposes only what consumers need.
+  Use `pub(crate)` for internal helpers. Keep `pub` surface minimal.
+- **Documented**: Every public Rust type and function has a `///` doc comment
+  explaining what it does and why.
+- **Error handling**: Use `Result<T, E>` with descriptive error types.
+  No `.unwrap()` in production code. Use `thiserror` for library errors.
+- **Naming**: Rust follows `snake_case`. TypeScript follows `camelCase`.
+  Names must be descriptive — no single-letter variables except loop indices.
+- **No dead code**: Remove unused imports, functions, and types immediately.
+  `cargo clippy` and TypeScript strict mode enforce this.
+- **Small commits**: Commit at each sub-step boundary with a clear message.
+  Each commit should compile and pass tests.
+
+---
+
 ## Current .rbl File Format
 
 The current .rbl save/load is **plain JSON** (not ZIP). The flow:
@@ -1266,6 +1312,13 @@ Delete tests that test deleted code (TS engine).
 2. **Never break the app.** After every file change, the app must still compile and run.
 3. **Use compatibility layer in Phase 1.** Update components one at a time, not all at once.
 4. **Test after every sub-step.** Run `cargo build`, `npm run build`, launch the app.
-5. **Migrate only existing features.** Do NOT add cosmic-text, AI, networking, or .rbl ZIP.
-6. **Keep React UI identical.** Same look, same behavior, same interactions.
-7. **Commit at each sub-step boundary** with clear message describing what changed.
+5. **Full verification after every phase.** Run `cargo test --workspace`, `cargo clippy --workspace`,
+   `npm run build`, and launch the app to verify all features work. See "Mandatory Rules" section.
+6. **Migrate only existing features.** Do NOT add cosmic-text, AI, networking, or .rbl ZIP.
+7. **Keep React UI identical.** Same look, same behavior, same interactions.
+8. **Commit at each sub-step boundary** with clear message describing what changed.
+9. **Write modular, refactored code.** No god-files, no duplication, no dead code.
+   Follow the code quality standards in "Mandatory Rules" section.
+10. **Write tests alongside code.** Every Rust module must have `#[cfg(test)] mod tests`
+    with unit tests covering serialization round-trips, command execution, and core logic.
+    Do not defer tests to Phase 4 — write them as you build each module.
