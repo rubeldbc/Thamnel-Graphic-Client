@@ -2,6 +2,8 @@ import type { Command } from './types';
 import { useDocumentStore } from '../stores/documentStore';
 import { useUiStore } from '../stores/uiStore';
 import { createDefaultProject, createDefaultLayer } from '../types/index';
+import { documentToLegacyProject } from '../types/compat';
+import type { DocumentModel } from '../types/document-model';
 import { compositeAllLayers } from '../engine/compositor';
 
 // ---------------------------------------------------------------------------
@@ -45,15 +47,37 @@ async function tauriDialogOpen(
 // Serialization helpers
 // ---------------------------------------------------------------------------
 
+/** Serialize using the legacy ProjectModel format (backward compatible). */
 function serializeProject(): string {
   const { project } = useDocumentStore.getState();
   return JSON.stringify(project, null, 2);
 }
 
+/**
+ * Detect whether parsed JSON is the new DocumentModel format.
+ * New format has `nodes` array and `canvasSize` object.
+ * Old format has `layers` array and flat `canvasWidth`/`canvasHeight`.
+ */
+function isDocumentModel(data: Record<string, unknown>): boolean {
+  return Array.isArray(data.nodes) && typeof data.canvasSize === 'object';
+}
+
+/**
+ * Load a project from JSON string. Supports both:
+ * - Old format (ProjectModel with layers[])
+ * - New format (DocumentModel with nodes[])
+ */
 function loadProjectFromJson(json: string): void {
   try {
-    const project = JSON.parse(json);
-    useDocumentStore.getState().setProject(project);
+    const data = JSON.parse(json);
+    if (isDocumentModel(data)) {
+      // New format: convert DocumentModel → ProjectModel for the store
+      const project = documentToLegacyProject(data as DocumentModel);
+      useDocumentStore.getState().setProject(project);
+    } else {
+      // Old format: use as-is
+      useDocumentStore.getState().setProject(data);
+    }
     useDocumentStore.getState().markClean();
   } catch (e) {
     console.error('[fileCommands] Failed to parse project JSON:', e);

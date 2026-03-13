@@ -1,9 +1,15 @@
 import { create } from 'zustand';
 import type { ProjectModel, LayerModel } from '../types/index';
 import { createDefaultProject } from '../types/index';
+import type { DocumentModel } from '../types/document-model';
+import type { Node } from '../types/node';
+import { legacyProjectToDocument } from '../types/compat';
+import { setDocument as rustSetDocument } from '../bridge/documentBridge';
 
 export interface DocumentState {
   project: ProjectModel;
+  /** Mirror of project as DocumentModel (Node-based), kept in sync. */
+  document: DocumentModel;
   selectedLayerIds: string[];
   undoStack: ProjectModel[];
   redoStack: ProjectModel[];
@@ -41,14 +47,45 @@ export interface DocumentActions {
   isTextSelected: () => boolean;
   isImageSelected: () => boolean;
   isShapeSelected: () => boolean;
+  // Node-based accessors (read from document mirror)
+  getNodes: () => Node[];
+  getNodeById: (id: string) => Node | undefined;
+  getDocument: () => DocumentModel;
 }
 
 export type DocumentStore = DocumentState & DocumentActions;
 
 const MAX_UNDO = 50;
 
+// ---------------------------------------------------------------------------
+// Rust document sync (fire-and-forget, debounced)
+// ---------------------------------------------------------------------------
+
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Derive DocumentModel from ProjectModel and push to Rust. */
+function syncProjectToRust(project: ProjectModel): void {
+  if (syncTimer) {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+  }
+  syncTimer = setTimeout(() => {
+    try {
+      const doc = legacyProjectToDocument(project);
+      rustSetDocument(doc).catch(() => {
+        // Silently ignore — Tauri runtime may not be available in dev/test
+      });
+    } catch {
+      // Conversion error — non-fatal
+    }
+  }, 50);
+}
+
+const defaultProject = createDefaultProject();
+
 export const useDocumentStore = create<DocumentStore>((set, get) => ({
-  project: createDefaultProject(),
+  project: defaultProject,
+  document: legacyProjectToDocument(defaultProject),
   selectedLayerIds: [],
   undoStack: [],
   redoStack: [],
@@ -216,4 +253,24 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       return layer?.type === 'shape';
     });
   },
+
+  // Node-based accessors (read from the document mirror)
+  getNodes: () => get().document.nodes,
+  getNodeById: (id: string) =>
+    get().document.nodes.find((n) => n.base.identity.id === id),
+  getDocument: () => get().document,
 }));
+
+// ---------------------------------------------------------------------------
+// Auto-sync: keep document mirror and Rust state in sync with project changes
+// ---------------------------------------------------------------------------
+
+useDocumentStore.subscribe((state, prevState) => {
+  if (state.project !== prevState.project) {
+    // Update document mirror
+    const doc = legacyProjectToDocument(state.project);
+    useDocumentStore.setState({ document: doc });
+    // Push to Rust (debounced, fire-and-forget)
+    syncProjectToRust(state.project);
+  }
+});

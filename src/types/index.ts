@@ -60,3 +60,44 @@ export {
 
 export type { ProjectMetadata, ProjectModel } from './ProjectModel';
 export { createDefaultProject, createDefaultProjectMetadata } from './ProjectModel';
+
+// --- New types (Rust mirror) ---
+
+export type { Point, Size, Rect } from './geometry';
+
+export type { Transform } from './transform';
+export { createDefaultTransform } from './transform';
+
+export type { NodeIdentity } from './identity';
+
+export type {
+  NodeBase,
+  ImageData as NodeImageData,
+  GroupData as NodeGroupData,
+  NodeKind,
+  Node,
+  NodeType,
+  EffectStack,
+} from './node';
+export {
+  getNodeType,
+  isImageNode,
+  isTextNode,
+  isShapeNode,
+  isGroupNode,
+  getImageData,
+  getTextProperties,
+  getShapeProperties,
+  getGroupData,
+} from './node';
+
+export type { DocumentMetadata, DocumentModel } from './document-model';
+export { createDefaultDocumentMetadata, createDefaultDocumentModel } from './document-model';
+
+// --- Compatibility adapters (TEMPORARY — delete after full migration) ---
+export {
+  nodeToLegacyLayer,
+  legacyLayerToNode,
+  documentToLegacyProject,
+  legacyProjectToDocument,
+} from './compat';
