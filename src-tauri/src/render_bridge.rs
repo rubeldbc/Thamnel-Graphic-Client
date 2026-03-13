@@ -4,6 +4,7 @@
 //! Phase 2: render_frame_bin (binary) and export_render commands.
 //! Phase 3: hit_test, hit_test_all, marquee_select commands.
 
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -82,6 +83,28 @@ pub fn render_frame(
     viewport: ViewportParams,
     selection: SelectionParams,
 ) -> Result<RenderFrameResponse, String> {
+    // Wrap in catch_unwind to prevent GPU panics from crashing the app.
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        render_frame_inner(&doc_state, &render_state, viewport, selection)
+    }));
+
+    match result {
+        Ok(inner) => inner,
+        Err(panic_info) => {
+            let msg = panic_payload_to_string(&panic_info);
+            eprintln!("[render_bridge] PANIC caught in render_frame: {msg}");
+            reset_engine(&render_state);
+            Err(format!("GPU render panic: {msg}"))
+        }
+    }
+}
+
+fn render_frame_inner(
+    doc_state: &State<AppDocumentState>,
+    render_state: &State<AppRenderState>,
+    viewport: ViewportParams,
+    selection: SelectionParams,
+) -> Result<RenderFrameResponse, String> {
     let t0 = Instant::now();
 
     let doc = doc_state
@@ -89,10 +112,16 @@ pub fn render_frame(
         .lock()
         .map_err(|e| format!("Document lock poisoned: {e}"))?;
 
+    // Recover from poisoned engine mutex (can happen after a caught panic)
     let mut engine_lock = render_state
         .engine
         .lock()
-        .map_err(|e| format!("Render engine lock poisoned: {e}"))?;
+        .unwrap_or_else(|e| {
+            eprintln!("[render_bridge] Engine mutex was poisoned, recovering");
+            let mut guard = e.into_inner();
+            *guard = None;
+            guard
+        });
 
     let engine = AppRenderState::ensure_engine(&mut engine_lock)?;
 
@@ -200,14 +229,56 @@ pub fn render_frame_bin(
     viewport: ViewportParams,
     selection: SelectionParams,
 ) -> Response {
-    match render_frame_bin_inner(&doc_state, &render_state, viewport, selection) {
-        Ok(data) => Response::new(data),
-        Err(e) => {
+    // Wrap in catch_unwind to convert any wgpu/Vello panics into error
+    // responses instead of crashing the entire application.
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        render_frame_bin_inner(&doc_state, &render_state, viewport, selection)
+    }));
+
+    match result {
+        Ok(Ok(data)) => Response::new(data),
+        Ok(Err(e)) => {
             eprintln!("[render_bridge] render_frame_bin error: {e}");
-            // Return 32-byte error header with status=1
-            let mut header = vec![0u8; BIN_HEADER_SIZE];
-            header[24..28].copy_from_slice(&1u32.to_le_bytes());
-            Response::new(header)
+            error_header()
+        }
+        Err(panic_info) => {
+            let msg = panic_payload_to_string(&panic_info);
+            eprintln!("[render_bridge] PANIC caught in render_frame_bin: {msg}");
+            // Reset engine so it gets re-created on next render
+            reset_engine(&render_state);
+            error_header()
+        }
+    }
+}
+
+/// Build a 32-byte error header (status=1) for binary IPC error responses.
+fn error_header() -> Response {
+    let mut header = vec![0u8; BIN_HEADER_SIZE];
+    header[24..28].copy_from_slice(&1u32.to_le_bytes());
+    Response::new(header)
+}
+
+/// Extract a human-readable message from a panic payload.
+fn panic_payload_to_string(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
+
+/// Reset the render engine after a panic so it gets re-created on next render.
+/// Handles poisoned mutex from the caught panic.
+fn reset_engine(render_state: &State<AppRenderState>) {
+    match render_state.engine.lock() {
+        Ok(mut lock) => {
+            *lock = None;
+        }
+        Err(e) => {
+            eprintln!("[render_bridge] Engine mutex poisoned after panic, recovering");
+            *e.into_inner() = None;
         }
     }
 }
@@ -225,10 +296,16 @@ fn render_frame_bin_inner(
         .lock()
         .map_err(|e| format!("Document lock poisoned: {e}"))?;
 
+    // Recover from poisoned engine mutex (can happen after a caught panic)
     let mut engine_lock = render_state
         .engine
         .lock()
-        .map_err(|e| format!("Render engine lock poisoned: {e}"))?;
+        .unwrap_or_else(|e| {
+            eprintln!("[render_bridge] Engine mutex was poisoned, recovering");
+            let mut guard = e.into_inner();
+            *guard = None; // Clear stale engine state — will be re-created below
+            guard
+        });
 
     let engine = AppRenderState::ensure_engine(&mut engine_lock)?;
 
@@ -317,6 +394,28 @@ pub fn export_render(
     height: u32,
     format: String,
 ) -> Result<Vec<u8>, String> {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        export_render_inner(&doc_state, &render_state, width, height, format)
+    }));
+
+    match result {
+        Ok(inner) => inner,
+        Err(panic_info) => {
+            let msg = panic_payload_to_string(&panic_info);
+            eprintln!("[render_bridge] PANIC caught in export_render: {msg}");
+            reset_engine(&render_state);
+            Err(format!("GPU export panic: {msg}"))
+        }
+    }
+}
+
+fn export_render_inner(
+    doc_state: &State<AppDocumentState>,
+    render_state: &State<AppRenderState>,
+    width: u32,
+    height: u32,
+    format: String,
+) -> Result<Vec<u8>, String> {
     let doc = doc_state
         .document
         .lock()
@@ -325,7 +424,12 @@ pub fn export_render(
     let mut engine_lock = render_state
         .engine
         .lock()
-        .map_err(|e| format!("Render engine lock poisoned: {e}"))?;
+        .unwrap_or_else(|e| {
+            eprintln!("[render_bridge] Engine mutex was poisoned, recovering");
+            let mut guard = e.into_inner();
+            *guard = None;
+            guard
+        });
 
     let engine = AppRenderState::ensure_engine(&mut engine_lock)?;
 
