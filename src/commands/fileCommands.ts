@@ -5,6 +5,7 @@ import { createDefaultProject, createDefaultLayer } from '../types/index';
 import { documentToLegacyProject } from '../types/compat';
 import type { DocumentModel } from '../types/document-model';
 import { compositeAllLayers } from '../engine/compositor';
+import { exportRender } from '../bridge/renderBridge';
 
 // ---------------------------------------------------------------------------
 // Tauri API helpers (lazy imports – gracefully degrade in browser/test)
@@ -224,21 +225,34 @@ export const exportImage: Command = {
     try {
       useUiStore.getState().setStatusMessage('Exporting image...');
       const { project } = useDocumentStore.getState();
-      const { canvasWidth, canvasHeight, backgroundColor, layers } = project;
+      const { canvasWidth, canvasHeight } = project;
+      const ext = path.split('.').pop()?.toLowerCase() ?? 'png';
 
-      // Render at full resolution
+      // Try Rust GPU export for PNG/JPEG (hardware-accelerated rendering)
+      const rustFormat = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext === 'png' ? 'png' : null;
+      if (rustFormat) {
+        try {
+          const bytes = await exportRender(canvasWidth, canvasHeight, rustFormat);
+          await tauriInvoke('export_image_data', { path, data: bytes, format: ext });
+          useUiStore.getState().setStatusMessage(`Exported: ${path.split(/[/\\]/).pop()}`);
+          return;
+        } catch {
+          // Rust GPU export failed — fall back to TypeScript Canvas 2D
+        }
+      }
+
+      // Fallback: TypeScript Canvas 2D rendering (also used for BMP/WebP)
+      const { backgroundColor, layers } = project;
       const canvas = compositeAllLayers(
         layers,
         canvasWidth,
         canvasHeight,
         backgroundColor,
-        1, // zoom=1 for export
-        100, // full quality
+        1,
+        100,
         false,
       );
 
-      // Determine format from file extension
-      const ext = path.split('.').pop()?.toLowerCase() ?? 'png';
       const mimeMap: Record<string, string> = {
         png: 'image/png',
         jpg: 'image/jpeg',
@@ -248,7 +262,6 @@ export const exportImage: Command = {
       };
       const mime = mimeMap[ext] ?? 'image/png';
 
-      // Convert canvas to blob
       const blob = await new Promise<Blob | null>((resolve) =>
         canvas.toBlob(resolve, mime, 0.95),
       );
@@ -257,12 +270,7 @@ export const exportImage: Command = {
       const arrayBuffer = await blob.arrayBuffer();
       const bytes = Array.from(new Uint8Array(arrayBuffer));
 
-      await tauriInvoke('export_image_data', {
-        path,
-        data: bytes,
-        format: ext,
-      });
-
+      await tauriInvoke('export_image_data', { path, data: bytes, format: ext });
       useUiStore.getState().setStatusMessage(`Exported: ${path.split(/[/\\]/).pop()}`);
     } catch (e) {
       console.error('[fileCommands] exportImage failed:', e);

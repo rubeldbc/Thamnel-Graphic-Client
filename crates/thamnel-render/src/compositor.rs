@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use kurbo::{Affine, Rect};
-use peniko::{Brush, Color, Fill};
+use peniko::{Blob, BlendMode, Brush, Color, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFormat, ImageSampler, Mix};
 use vello::Scene;
 
 use thamnel_core::node::{Node, NodeKind};
@@ -131,24 +131,21 @@ fn render_node(
     }
 }
 
-/// Render a decoded image to the scene.
+/// Render a decoded image to the scene using Vello's image brush.
 fn render_image(
     scene: &mut Scene,
-    _decoded: &DecodedImage,
+    decoded: &DecodedImage,
     layer_w: f64,
     layer_h: f64,
     transform: Affine,
     opacity: f64,
     base: &thamnel_core::node::NodeBase,
 ) {
-    // Apply crop
     let crop_left = base.crop_left;
     let crop_top = base.crop_top;
     let crop_right = base.crop_right;
     let crop_bottom = base.crop_bottom;
 
-    let draw_x = crop_left;
-    let draw_y = crop_top;
     let draw_w = layer_w - crop_left - crop_right;
     let draw_h = layer_h - crop_top - crop_bottom;
 
@@ -156,19 +153,44 @@ fn render_image(
         return;
     }
 
-    // Draw the image as a filled rectangle with the image brush
-    let rect = Rect::new(draw_x, draw_y, draw_x + draw_w, draw_y + draw_h);
+    // Create a peniko ImageData from the decoded RGBA pixel data
+    let blob: Blob<u8> = decoded.rgba.clone().into();
+    let image_data = ImageData {
+        data: blob,
+        format: ImageFormat::Rgba8,
+        alpha_type: ImageAlphaType::Alpha,
+        width: decoded.width,
+        height: decoded.height,
+    };
 
-    // For now, render a placeholder rectangle showing the image exists
-    // Full image brush rendering requires creating a Vello Image from decoded RGBA
-    let placeholder_color = Color::from_rgba8(128, 128, 128, (opacity * 255.0) as u8);
-    scene.fill(
-        Fill::NonZero,
-        transform,
-        &Brush::Solid(placeholder_color),
-        None,
-        &rect,
-    );
+    // Create an ImageBrush with opacity baked into the sampler alpha
+    let image_brush = ImageBrush {
+        image: image_data,
+        sampler: ImageSampler::default().with_alpha(opacity as f32),
+    };
+
+    // Scale from image pixel space to layer local space
+    let sx = layer_w / decoded.width as f64;
+    let sy = layer_h / decoded.height as f64;
+    let image_xform = transform * Affine::scale_non_uniform(sx, sy);
+
+    let has_crop = crop_left > 0.0 || crop_top > 0.0 || crop_right > 0.0 || crop_bottom > 0.0;
+
+    if has_crop {
+        // Use a compositing layer for crop clipping
+        let clip_rect = Rect::new(crop_left, crop_top, crop_left + draw_w, crop_top + draw_h);
+        scene.push_layer(
+            Fill::NonZero,
+            BlendMode::new(Mix::Normal, peniko::Compose::SrcOver),
+            1.0,
+            transform,
+            &clip_rect,
+        );
+        scene.draw_image(&image_brush, image_xform);
+        scene.pop_layer();
+    } else {
+        scene.draw_image(&image_brush, image_xform);
+    }
 }
 
 /// Render selection gizmos (bounding boxes and handles) for selected nodes.

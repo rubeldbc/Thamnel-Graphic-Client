@@ -684,6 +684,10 @@ export function CanvasViewport({
 
   // ---------------------------------------------------------------------------
   // Render loop: composite layers onto <canvas>
+  //
+  // Uses TypeScript Canvas 2D compositing for the live render loop (synchronous,
+  // zero IPC overhead). The Rust GPU render engine is available via the render
+  // bridge for export and on-demand rendering where GPU acceleration adds value.
   // ---------------------------------------------------------------------------
   useEffect(() => {
     let mounted = true;
