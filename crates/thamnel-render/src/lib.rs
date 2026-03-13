@@ -8,6 +8,7 @@ pub mod compositor;
 pub mod conversions;
 pub mod engine;
 pub mod export;
+pub mod hit_test;
 pub mod shape_render;
 pub mod text_render;
 

@@ -4416,6 +4416,7 @@ dependencies = [
  "pollster",
  "thamnel-core",
  "thiserror 2.0.18",
+ "uuid",
  "vello",
  "wgpu",
 ]

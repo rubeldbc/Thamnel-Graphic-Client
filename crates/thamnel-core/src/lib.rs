@@ -31,6 +31,7 @@ pub mod node;
 pub mod document;
 pub mod commands;
 pub mod history;
+pub mod hit_test;
 
 // Re-export key types for ergonomic use.
 pub use geometry::{Point, Size, Rect, BezierPath, PathCommand};

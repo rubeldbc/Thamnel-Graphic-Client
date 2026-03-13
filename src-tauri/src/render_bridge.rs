@@ -1,6 +1,7 @@
-//! Tauri IPC bridge for the GPU render engine.
+//! Tauri IPC bridge for the GPU render engine and hit-testing.
 //!
-//! Phase 2: exposes render_frame and export_to_image commands to the frontend.
+//! Phase 2: render_frame and export_render commands.
+//! Phase 3: hit_test, hit_test_all, marquee_select commands.
 
 use std::sync::Mutex;
 
@@ -126,4 +127,55 @@ pub fn export_render(
 
     export::export_document(engine, &doc, width, height, fmt)
         .map_err(|e| format!("Export failed: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: Hit-testing IPC commands
+// ---------------------------------------------------------------------------
+
+/// Hit-test at a canvas-space point. Returns the UUID of the topmost hit node.
+#[tauri::command]
+pub fn hit_test(
+    doc_state: State<AppDocumentState>,
+    x: f64,
+    y: f64,
+) -> Option<String> {
+    let doc = doc_state.document.lock().ok()?;
+    thamnel_render::hit_test::hit_test_point(&doc, x, y).map(|id| id.to_string())
+}
+
+/// Hit-test at a canvas-space point. Returns UUIDs of ALL hit nodes (top-to-bottom).
+#[tauri::command]
+pub fn hit_test_all(
+    doc_state: State<AppDocumentState>,
+    x: f64,
+    y: f64,
+) -> Vec<String> {
+    let doc = match doc_state.document.lock() {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    thamnel_render::hit_test::hit_test_all(&doc, x, y)
+        .into_iter()
+        .map(|id| id.to_string())
+        .collect()
+}
+
+/// Marquee-select: find all nodes whose AABB intersects the given rectangle.
+#[tauri::command]
+pub fn marquee_select(
+    doc_state: State<AppDocumentState>,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Vec<String> {
+    let doc = match doc_state.document.lock() {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    thamnel_render::hit_test::select_by_marquee(&doc, x, y, w, h)
+        .into_iter()
+        .map(|id| id.to_string())
+        .collect()
 }

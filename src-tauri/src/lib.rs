@@ -46,6 +46,10 @@ pub fn run() {
             // Render bridge (Phase 2)
             render_bridge::render_frame,
             render_bridge::export_render,
+            // Hit-testing (Phase 3)
+            render_bridge::hit_test,
+            render_bridge::hit_test_all,
+            render_bridge::marquee_select,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
