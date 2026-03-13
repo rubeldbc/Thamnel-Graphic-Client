@@ -296,14 +296,36 @@ export interface AccessibilitySettings {
 }
 
 export interface ShapeToolSettings {
-  /** Last used shape type (rectangle, ellipse, star, line). */
+  /** Last used shape type (rectangle, ellipse, star, line, etc.). */
   lastShapeType: string;
+
+  // ---- Star settings ----
   /** Star outer spike distance from center (pixels, reference). */
   starSpikeHigh: number;
   /** Star inner valley distance from center (pixels, reference). */
   starSpikeLow: number;
   /** Number of star spikes. */
   starSpikeCount: number;
+
+  // ---- Common shape settings ----
+  /** Default fill color for new shapes. */
+  fillColor: string;
+  /** Default stroke color for new shapes. */
+  strokeColor: string;
+  /** Default stroke width for new shapes. */
+  strokeWidth: number;
+  /** Default corner radius for rectangles. */
+  cornerRadius: number;
+  /** Default shape width (px). */
+  shapeWidth: number;
+  /** Default shape height (px). */
+  shapeHeight: number;
+  /** Default shape opacity (0-100). */
+  shapeOpacity: number;
+  /** Default polygon sides. */
+  polygonSides: number;
+  /** Whether gradient fill was enabled. */
+  gradientEnabled: boolean;
 }
 
 export interface RecentFilesSettings {
@@ -651,6 +673,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
     starSpikeHigh: 50,
     starSpikeLow: 25,
     starSpikeCount: 5,
+    fillColor: '#FF6600',
+    strokeColor: '#FFFFFF',
+    strokeWidth: 2,
+    cornerRadius: 0,
+    shapeWidth: 200,
+    shapeHeight: 200,
+    shapeOpacity: 100,
+    polygonSides: 5,
+    gradientEnabled: false,
   },
 
   recentFiles: {

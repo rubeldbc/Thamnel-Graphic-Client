@@ -158,9 +158,26 @@ export interface SettingsActions {
   resetAll: () => void;
   loadSettings: () => void;
   saveSettings: () => void;
+  /** Load settings from Tauri AppData file (async, overrides localStorage). */
+  loadSettingsFromFile: () => Promise<void>;
+  /** Save settings to Tauri AppData file (async). */
+  saveSettingsToFile: () => Promise<void>;
 }
 
 export type SettingsStore = SettingsState & SettingsActions;
+
+// ---------------------------------------------------------------------------
+// Tauri detection
+// ---------------------------------------------------------------------------
+
+function isTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI__' in window;
+}
+
+async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<T>(cmd, args);
+}
 
 // ---------------------------------------------------------------------------
 // Debounce timer (module-level so it persists across calls)
@@ -174,6 +191,10 @@ function debouncedSave(store: SettingsStore) {
   }
   debounceTimer = setTimeout(() => {
     store.saveSettings();
+    // Also persist to Tauri file
+    if (isTauri()) {
+      store.saveSettingsToFile().catch(() => {/* ignore */});
+    }
     debounceTimer = null;
   }, DEBOUNCE_MS);
 }
@@ -255,6 +276,49 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       storageBackend.setItem(STORAGE_KEY, payload);
     } catch {
       // Storage full or unavailable – ignore silently.
+    }
+  },
+
+  // ---- loadSettingsFromFile (Tauri) --------------------------------------
+  loadSettingsFromFile: async (): Promise<void> => {
+    if (!isTauri()) return;
+    try {
+      const raw = await tauriInvoke<string>('load_settings');
+      if (!raw || raw === '{}') return;
+
+      const parsed = JSON.parse(raw) as {
+        version?: number;
+        settings?: Partial<AppSettings>;
+      };
+
+      const defaults = createDefaultSettings();
+      const merged = deepMerge(
+        defaults as unknown as Record<string, unknown>,
+        ((parsed.settings ?? {}) as unknown) as Record<string, unknown>,
+      );
+
+      set({
+        settings: merged as unknown as AppSettings,
+        version: parsed.version ?? SETTINGS_VERSION,
+      });
+
+      // Also sync to localStorage as fallback cache
+      const payload = JSON.stringify({ version: parsed.version ?? SETTINGS_VERSION, settings: merged });
+      storageBackend.setItem(STORAGE_KEY, payload);
+    } catch {
+      // File not found or corrupt – keep current settings.
+    }
+  },
+
+  // ---- saveSettingsToFile (Tauri) ----------------------------------------
+  saveSettingsToFile: async (): Promise<void> => {
+    if (!isTauri()) return;
+    try {
+      const { settings, version } = get();
+      const payload = JSON.stringify({ version, settings });
+      await tauriInvoke('save_settings', { data: payload });
+    } catch {
+      // Tauri unavailable – ignore silently.
     }
   },
 }));

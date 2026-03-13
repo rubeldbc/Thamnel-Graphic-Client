@@ -1,4 +1,9 @@
+import { useState } from 'react';
 import { Icon } from '../../common/Icon';
+import { ColorSwatch } from '../../common/ColorSwatch';
+import { ColorPickerWindow } from '../../Dialogs/ColorPickerWindow';
+import { useDocumentStore } from '../../../stores/documentStore';
+import { useSettingsStore } from '../../../settings/settingsStore';
 import {
   mdiExport,
   mdiPlus,
@@ -57,43 +62,77 @@ const BUTTONS: FooterButton[] = [
 // ---------------------------------------------------------------------------
 
 export function LayerFooterBar(props: LayerFooterBarProps) {
+  const backgroundColor = useDocumentStore((s) => s.project.backgroundColor);
+  const setBackgroundColor = useDocumentStore((s) => s.setBackgroundColor);
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
+
+  const handleBgColorOk = (color: string) => {
+    setBackgroundColor(color);
+    // Persist to settings for next run
+    useSettingsStore.getState().setSetting('canvas.defaultBackground', color);
+    setColorPickerOpen(false);
+  };
+
   return (
-    <div
-      data-testid="layer-footer"
-      className="flex shrink-0 items-center gap-0.5 border-t px-1 py-1"
-      style={{
-        backgroundColor: 'var(--toolbar-bg)',
-        borderColor: 'var(--border-color)',
-      }}
-    >
-      {BUTTONS.map((btn) => {
-        const handler = props[btn.handler] as (() => void) | undefined;
-        return (
-          <button
-            key={btn.testId}
-            type="button"
-            data-testid={btn.testId}
-            title={btn.title}
-            className="flex shrink-0 cursor-pointer items-center justify-center rounded-sm border-none outline-none"
-            style={{
-              width: 28,
-              height: 28,
-              backgroundColor: btn.bg ?? 'transparent',
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              handler?.();
-            }}
-          >
-            <Icon
-              path={btn.icon}
-              size={14}
-              color={btn.color ?? 'var(--text-secondary)'}
-            />
-          </button>
-        );
-      })}
-    </div>
+    <>
+      <div
+        data-testid="layer-footer"
+        className="flex shrink-0 items-center gap-0.5 border-t px-1 py-1"
+        style={{
+          backgroundColor: 'var(--toolbar-bg)',
+          borderColor: 'var(--border-color)',
+        }}
+      >
+        {BUTTONS.map((btn) => {
+          const handler = props[btn.handler] as (() => void) | undefined;
+          return (
+            <button
+              key={btn.testId}
+              type="button"
+              data-testid={btn.testId}
+              title={btn.title}
+              className="flex shrink-0 cursor-pointer items-center justify-center rounded-sm border-none outline-none"
+              style={{
+                width: 28,
+                height: 28,
+                backgroundColor: btn.bg ?? 'transparent',
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                handler?.();
+              }}
+            >
+              <Icon
+                path={btn.icon}
+                size={14}
+                color={btn.color ?? 'var(--text-secondary)'}
+              />
+            </button>
+          );
+        })}
+
+        {/* Spacer to push background swatch to the right */}
+        <div className="flex-1" />
+
+        {/* Canvas background color swatch */}
+        <ColorSwatch
+          color={backgroundColor}
+          size={22}
+          label="canvas-bg"
+          onClick={() => setColorPickerOpen(true)}
+        />
+      </div>
+
+      {/* Color picker dialog for canvas background */}
+      <ColorPickerWindow
+        open={colorPickerOpen}
+        onOpenChange={setColorPickerOpen}
+        initialColor={backgroundColor}
+        onOk={handleBgColorOk}
+        onCancel={() => setColorPickerOpen(false)}
+        onColorChange={(color) => setBackgroundColor(color)}
+      />
+    </>
   );
 }
 

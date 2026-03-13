@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Select from '@radix-ui/react-select';
 import * as Switch from '@radix-ui/react-switch';
@@ -23,6 +23,7 @@ import {
 } from '@mdi/js';
 import { addShape } from '../../commands/layerCommands';
 import { useDocumentStore } from '../../stores/documentStore';
+import { useSettingsStore } from '../../settings/settingsStore';
 import { SHAPE_TYPES } from '../../types/enums';
 import type { ShapeType } from '../../types/enums';
 import { useDraggable } from '../../hooks/useDraggable';
@@ -88,6 +89,28 @@ export function ShapeDrawingWindow({ open, onOpenChange, onSendToCanvas }: Shape
   const [shapeWidth, setShapeWidth] = useState(200);
   const [shapeHeight, setShapeHeight] = useState(200);
 
+  // Load persisted shape settings when dialog opens
+  useEffect(() => {
+    if (!open) return;
+    const gs = useSettingsStore.getState().getSetting;
+    const w = gs('shapeTool.shapeWidth') as number;
+    const h = gs('shapeTool.shapeHeight') as number;
+    const sw = gs('shapeTool.strokeWidth') as number;
+    const cr = gs('shapeTool.cornerRadius') as number;
+    const op = gs('shapeTool.shapeOpacity') as number;
+    const ge = gs('shapeTool.gradientEnabled') as boolean;
+    const fc = gs('shapeTool.fillColor') as string;
+    const sc = gs('shapeTool.strokeColor') as string;
+    if (w > 0) setShapeWidth(w);
+    if (h > 0) setShapeHeight(h);
+    if (typeof sw === 'number') setStrokeWidth(sw);
+    if (typeof cr === 'number') setCornerRadius(cr);
+    if (typeof op === 'number' && op > 0) setOpacity(op);
+    if (typeof ge === 'boolean') setGradientEnabled(ge);
+    if (fc) _setFillColor(fc);
+    if (sc) _setStrokeColor(sc);
+  }, [open]);
+
   // Map display name to ShapeType enum
   const shapeTypeMap: Record<string, ShapeType> = {};
   for (const st of SHAPE_TYPES) {
@@ -120,9 +143,20 @@ export function ShapeDrawingWindow({ open, onOpenChange, onSendToCanvas }: Shape
         });
       }
     }
+    // Persist shape settings for next time
+    const ss = useSettingsStore.getState().setSetting;
+    ss('shapeTool.shapeWidth', shapeWidth);
+    ss('shapeTool.shapeHeight', shapeHeight);
+    ss('shapeTool.strokeWidth', strokeWidth);
+    ss('shapeTool.cornerRadius', cornerRadius);
+    ss('shapeTool.shapeOpacity', opacity);
+    ss('shapeTool.gradientEnabled', gradientEnabled);
+    ss('shapeTool.fillColor', fillColor);
+    ss('shapeTool.strokeColor', strokeColor);
+
     onSendToCanvas?.();
     onOpenChange(false);
-  }, [selectedShape, shapeWidth, shapeHeight, fillColor, strokeColor, strokeWidth, cornerRadius, opacity, onSendToCanvas, onOpenChange]);
+  }, [selectedShape, shapeWidth, shapeHeight, fillColor, strokeColor, strokeWidth, cornerRadius, opacity, gradientEnabled, onSendToCanvas, onOpenChange]);
 
   const [layers, setLayers] = useState<ShapeLayer[]>([
     { id: '1', name: 'Shape 1', visible: true },

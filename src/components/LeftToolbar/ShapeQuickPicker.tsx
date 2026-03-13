@@ -7,6 +7,7 @@ import {
 } from '@mdi/js';
 import { Icon } from '../common/Icon';
 import { StarSettingsDialog } from '../Dialogs/StarSettingsDialog';
+import { useSettingsStore } from '../../settings/settingsStore';
 
 // ---------------------------------------------------------------------------
 // Quick shape definitions
@@ -53,17 +54,18 @@ export function ShapeQuickPicker({ onSelect, anchorRect, open, onClose }: ShapeQ
   const popupRef = useRef<HTMLDivElement>(null);
   const [starSettingsOpen, setStarSettingsOpen] = useState(false);
 
-  // Close on outside click
+  // Close on outside click (but not when star settings dialog is open)
   useEffect(() => {
     if (!open) return;
     const handleClick = (e: MouseEvent) => {
+      if (starSettingsOpen) return;
       if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [open, onClose]);
+  }, [open, onClose, starSettingsOpen]);
 
   // Close on Escape
   useEffect(() => {
@@ -78,6 +80,8 @@ export function ShapeQuickPicker({ onSelect, anchorRect, open, onClose }: ShapeQ
   const handleSelect = useCallback(
     (id: string) => {
       onSelect(id);
+      // Persist last used shape type
+      useSettingsStore.getState().setSetting('shapeTool.lastShapeType', id);
       onClose();
     },
     [onSelect, onClose],

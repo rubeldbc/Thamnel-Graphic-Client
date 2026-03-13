@@ -732,7 +732,65 @@ describe('Fixes — Effects, Frames, and Performance', () => {
   });
 
   // =========================================================================
-  // 8. Default LayerEffect enabled states
+  // 8. Shape tool settings persistence
+  // =========================================================================
+
+  describe('Shape tool settings persistence', () => {
+    it('ShapeToolSettings has all expanded properties in defaults', async () => {
+      const { createDefaultSettings } = await import('../settings/AppSettings');
+      const defaults = createDefaultSettings();
+      const st = defaults.shapeTool;
+      expect(st.lastShapeType).toBe('rectangle');
+      expect(st.fillColor).toBe('#FF6600');
+      expect(st.strokeColor).toBe('#FFFFFF');
+      expect(st.strokeWidth).toBe(2);
+      expect(st.cornerRadius).toBe(0);
+      expect(st.shapeWidth).toBe(200);
+      expect(st.shapeHeight).toBe(200);
+      expect(st.shapeOpacity).toBe(100);
+      expect(st.polygonSides).toBe(5);
+      expect(st.gradientEnabled).toBe(false);
+    });
+
+    it('settingsStore can get/set expanded shape tool properties', async () => {
+      const { useSettingsStore } = await import('../settings/settingsStore');
+      const store = useSettingsStore.getState();
+      store.resetAll();
+
+      store.setSetting('shapeTool.fillColor', '#00FF00');
+      store.setSetting('shapeTool.shapeWidth', 400);
+      store.setSetting('shapeTool.lastShapeType', 'star');
+
+      expect(store.getSetting('shapeTool.fillColor')).toBe('#00FF00');
+      expect(store.getSetting('shapeTool.shapeWidth')).toBe(400);
+      expect(store.getSetting('shapeTool.lastShapeType')).toBe('star');
+    });
+
+    it('settings persist across save/load cycle', async () => {
+      const { useSettingsStore, MemoryStorageBackend, setStorageBackend } = await import('../settings/settingsStore');
+      const backend = new MemoryStorageBackend();
+      setStorageBackend(backend);
+
+      const store = useSettingsStore.getState();
+      store.resetAll();
+      store.setSetting('shapeTool.lastShapeType', 'ellipse');
+      store.setSetting('shapeTool.strokeWidth', 5);
+      store.setSetting('shapeTool.shapeWidth', 300);
+      store.saveSettings();
+
+      // Reset to defaults, then load
+      store.resetAll();
+      expect(store.getSetting('shapeTool.lastShapeType')).toBe('rectangle');
+
+      store.loadSettings();
+      expect(store.getSetting('shapeTool.lastShapeType')).toBe('ellipse');
+      expect(store.getSetting('shapeTool.strokeWidth')).toBe(5);
+      expect(store.getSetting('shapeTool.shapeWidth')).toBe(300);
+    });
+  });
+
+  // =========================================================================
+  // 9. Default LayerEffect enabled states
   // =========================================================================
 
   describe('Default LayerEffect enabled states', () => {
