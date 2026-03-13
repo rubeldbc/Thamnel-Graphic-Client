@@ -49,13 +49,8 @@ export interface LayerModel {
   renderVersion: number;
 }
 
-let _counter = 0;
-
 function generateId(): string {
-  _counter += 1;
-  const ts = Date.now().toString(36);
-  const rand = Math.random().toString(36).substring(2, 8);
-  return `${ts}-${rand}-${_counter}`;
+  return crypto.randomUUID();
 }
 
 export function createDefaultLayer(overrides?: Partial<LayerModel>): LayerModel {

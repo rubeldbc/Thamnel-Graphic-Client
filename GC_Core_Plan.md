@@ -87,15 +87,16 @@ Video output ready in seconds
 - Real-time text sync with Text Server over LAN
 - Send .rbl files to Animation/Render Server over LAN
 - Export final image as PNG/JPG/BMP
+- Complex vector illustration (pen tool, bezier editing, path operations)
 
 ### What it does NOT do:
-- Complex vector illustration (pen tool, bezier editing, path operations)
 - Video editing or timeline
 - Animation — that's the Animation Editor's job
 
 ### Shape System:
-- Basic shapes: Rectangle, RoundedRectangle, Ellipse, Triangle, Star, Arrow, Diamond, Heart, Pentagon, Hexagon, etc.
-- Created in a separate Shape Creator window
+- Basic shapes: Rectangle, Ellipse,Star etc.
+- Basic Shapes will be created directly in Canvas
+- But for the complex illustration a separate Shape Creator window will be used. After creating the shape will be sent to main canvas.
 - Placed on main canvas as mask layers or decorative elements
 - Defined as **own serializable geometry types** in thamnel-core (not kurbo types directly)
 - Converted to kurbo at the render layer for actual drawing

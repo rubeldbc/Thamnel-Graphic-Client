@@ -4,6 +4,7 @@
 //! Phase 3: hit_test, hit_test_all, marquee_select commands.
 
 use std::sync::Mutex;
+use std::time::Instant;
 
 use serde::Deserialize;
 use tauri::State;
@@ -65,6 +66,8 @@ pub fn render_frame(
     viewport: ViewportParams,
     selection: SelectionParams,
 ) -> Result<String, String> {
+    let t0 = Instant::now();
+
     let doc = doc_state
         .document
         .lock()
@@ -89,13 +92,26 @@ pub fn render_frame(
         selected_ids: selection.selected_ids,
     };
 
+    let t_render = Instant::now();
     let pixels = engine
         .render_frame(&doc, &vp, &sel)
-        .map_err(|e| format!("Render failed: {e}"))?;
+        .map_err(|e| {
+            eprintln!("[render_bridge] render_frame failed: {e}");
+            format!("Render failed: {e}")
+        })?;
+    let render_ms = t_render.elapsed().as_secs_f64() * 1000.0;
 
-    // Encode as base64 for transport over IPC
+    let t_encode = Instant::now();
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&pixels);
+    let encode_ms = t_encode.elapsed().as_secs_f64() * 1000.0;
+
+    let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    eprintln!(
+        "[GPU] render: {render_ms:.1}ms, encode: {encode_ms:.1}ms, total: {total_ms:.1}ms, {}x{}",
+        viewport.width, viewport.height,
+    );
+
     Ok(b64)
 }
 

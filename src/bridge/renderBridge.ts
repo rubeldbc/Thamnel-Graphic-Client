@@ -34,7 +34,6 @@ export interface SelectionParams {
 
 /**
  * Render the current document and return RGBA pixel data as a base64 string.
- * The caller can decode this into an ImageData for canvas display.
  */
 export async function renderFrame(
   viewport: ViewportParams,

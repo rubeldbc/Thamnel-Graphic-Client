@@ -34,13 +34,8 @@ export function createDefaultProjectMetadata(
   };
 }
 
-let _projectCounter = 0;
-
 function generateProjectId(): string {
-  _projectCounter += 1;
-  const ts = Date.now().toString(36);
-  const rand = Math.random().toString(36).substring(2, 8);
-  return `proj-${ts}-${rand}-${_projectCounter}`;
+  return crypto.randomUUID();
 }
 
 export function createDefaultProject(

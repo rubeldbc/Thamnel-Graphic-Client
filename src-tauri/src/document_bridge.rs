@@ -36,6 +36,7 @@ pub fn get_document(state: State<AppDocumentState>) -> Result<Document, String> 
 /// Replace the entire document (used when loading from .rbl file).
 #[tauri::command]
 pub fn set_document(state: State<AppDocumentState>, document: Document) -> Result<(), String> {
+    eprintln!("[document_bridge] set_document called with {} nodes", document.nodes.len());
     let mut doc = state
         .document
         .lock()

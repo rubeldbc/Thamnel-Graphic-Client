@@ -25,6 +25,9 @@ pub struct RenderEngine {
     target_texture: Option<Texture>,
     target_width: u32,
     target_height: u32,
+    /// Reusable readback buffer (recreated on viewport resize).
+    readback_buffer: Option<wgpu::Buffer>,
+    readback_buffer_size: u64,
     /// Decoded image cache: layer ID → decoded RGBA pixels + dimensions.
     image_cache: HashMap<String, DecodedImage>,
     /// Text layout engine.
@@ -81,6 +84,8 @@ impl RenderEngine {
             target_texture: None,
             target_width: 0,
             target_height: 0,
+            readback_buffer: None,
+            readback_buffer_size: 0,
             image_cache: HashMap::new(),
             text_engine,
         })
@@ -123,6 +128,87 @@ impl RenderEngine {
     /// Get a reference to the text engine for external use.
     pub fn text_engine_mut(&mut self) -> &mut TextEngine {
         &mut self.text_engine
+    }
+
+    /// Ensure the readback buffer is large enough for the current target.
+    fn ensure_readback_buffer(&mut self) {
+        let width = self.target_width;
+        let height = self.target_height;
+        let bytes_per_row = (width * 4 + 255) & !255;
+        let required = (bytes_per_row * height) as u64;
+
+        if self.readback_buffer_size >= required && self.readback_buffer.is_some() {
+            return;
+        }
+
+        self.readback_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("readback_buffer"),
+            size: required,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        }));
+        self.readback_buffer_size = required;
+    }
+
+    /// Fallback readback with a temporary buffer (when cached buffer is wrong size).
+    fn readback_fallback(
+        &self,
+        texture: &Texture,
+        width: u32,
+        height: u32,
+        bytes_per_row: u32,
+    ) -> Result<Vec<u8>, crate::backend::RenderError> {
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("readback_buffer_tmp"),
+            size: (bytes_per_row * height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("readback_encoder"),
+            });
+
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        self.queue.submit(Some(encoder.finish()));
+
+        let buffer_slice = buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        let _ = self.device.poll(PollType::wait_indefinitely());
+        rx.recv()
+            .map_err(|e| crate::backend::RenderError::Readback(e.to_string()))?
+            .map_err(|e| crate::backend::RenderError::Readback(e.to_string()))?;
+
+        let data = buffer_slice.get_mapped_range();
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for row in 0..height {
+            let start = (row * bytes_per_row) as usize;
+            let end = start + (width * 4) as usize;
+            pixels.extend_from_slice(&data[start..end]);
+        }
+
+        Ok(pixels)
     }
 }
 
@@ -183,7 +269,7 @@ impl RenderBackend for RenderEngine {
                     base_color: vello::peniko::Color::from_rgba8(0, 0, 0, 255),
                     width: self.target_width,
                     height: self.target_height,
-                    antialiasing_method: AaConfig::Msaa16,
+                    antialiasing_method: AaConfig::Area,
                 },
             )
             .map_err(|e| RenderError::Vello(format!("{e:?}")))?;
@@ -200,13 +286,23 @@ impl RenderBackend for RenderEngine {
         let width = self.target_width;
         let height = self.target_height;
         let bytes_per_row = (width * 4 + 255) & !255; // Align to 256 bytes
+        let required_size = (bytes_per_row * height) as u64;
 
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback_buffer"),
-            size: (bytes_per_row * height) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        // Reuse the readback buffer if it's large enough
+        let buffer = self
+            .readback_buffer
+            .as_ref()
+            .filter(|_| self.readback_buffer_size >= required_size)
+            .ok_or_else(|| RenderError::Readback("Readback buffer needs resize".into()));
+
+        let buffer = match buffer {
+            Ok(b) => b,
+            Err(_) => {
+                // Will be resized in render_frame's ensure_readback_buffer
+                // Fallback: create a temporary buffer
+                return self.readback_fallback(texture, width, height, bytes_per_row);
+            }
+        };
 
         let mut encoder = self
             .device
@@ -217,7 +313,7 @@ impl RenderBackend for RenderEngine {
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
+                buffer,
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(bytes_per_row),
@@ -233,8 +329,7 @@ impl RenderBackend for RenderEngine {
 
         self.queue.submit(Some(encoder.finish()));
 
-        // Map the buffer and read the data
-        let buffer_slice = buffer.slice(..);
+        let buffer_slice = buffer.slice(..required_size);
         let (tx, rx) = std::sync::mpsc::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
@@ -245,7 +340,6 @@ impl RenderBackend for RenderEngine {
             .map_err(|e| RenderError::Readback(e.to_string()))?;
 
         let data = buffer_slice.get_mapped_range();
-        // Remove row padding
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         for row in 0..height {
             let start = (row * bytes_per_row) as usize;
@@ -263,6 +357,7 @@ impl RenderBackend for RenderEngine {
         selection: &SelectionInfo,
     ) -> Result<Vec<u8>, RenderError> {
         self.ensure_target(viewport.width, viewport.height);
+        self.ensure_readback_buffer();
         self.prepare_resources(doc)?;
         self.build_scene(doc, viewport, selection)?;
         self.render()?;

@@ -15,6 +15,7 @@ import { compositeAllLayers } from '../../engine/compositor';
 import { getShapeTightBounds } from '../../engine/shapeRenderer';
 import { useSelectionManager } from '../../hooks/useSelectionManager';
 import { useSmartGuides } from '../../hooks/useSmartGuides';
+import { useGpuRenderer } from '../../hooks/useGpuRenderer';
 import { useCanvasInteraction, clientToCanvas } from '../../hooks/useCanvasInteraction';
 import type { ActiveTool } from '../../types/index';
 import {
@@ -134,7 +135,7 @@ export function CanvasViewport({
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasSurfaceRef = useRef<HTMLDivElement>(null);
   const renderCanvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number>(0);
+  // (rafRef removed — CPU compositor no longer uses a RAF loop)
 
   // ---------------------------------------------------------------------------
   // Get selected layers helper
@@ -683,48 +684,50 @@ export function CanvasViewport({
   }, [selectionManager, storeSelectLayer]);
 
   // ---------------------------------------------------------------------------
-  // Render loop: composite layers onto <canvas>
+  // Render loop: GPU (Rust wgpu+Vello) with CPU fallback
   //
-  // Uses TypeScript Canvas 2D compositing for the live render loop (synchronous,
-  // zero IPC overhead). The Rust GPU render engine is available via the render
-  // bridge for export and on-demand rendering where GPU acceleration adds value.
+  // The GPU hook drives the render loop via IPC to the Rust render engine.
+  // If GPU initialisation fails, gpuActive stays false and the CPU compositor
+  // below takes over as a fallback.
   // ---------------------------------------------------------------------------
+  // GPU renderer: asynchronously renders via Rust wgpu+Vello when Rust has
+  // fresh data. Runs alongside the CPU compositor below — GPU overwrites the
+  // canvas with higher-quality output when available.
+  // ---------------------------------------------------------------------------
+  useGpuRenderer({
+    canvasRef: renderCanvasRef,
+    canvasWidth,
+    canvasHeight,
+    selectedLayerIds: storeSelectedLayerIds,
+    enabled: true,
+  });
+
+  // CPU compositor: runs once per dependency change for immediate feedback.
+  // GPU renderer handles continuous updates asynchronously.
   useEffect(() => {
-    let mounted = true;
+    const displayCanvas = renderCanvasRef.current;
+    if (!displayCanvas) return;
 
-    const renderFrame = () => {
-      if (!mounted) return;
+    const t0 = performance.now();
+    const offscreen = compositeAllLayers(
+      layers,
+      canvasWidth,
+      canvasHeight,
+      backgroundColor,
+      1, // render at 1x scale; CSS zoom handles display scaling
+      100,
+      true, // interactive mode: skip expensive effects for speed
+    );
 
-      const displayCanvas = renderCanvasRef.current;
-      if (displayCanvas) {
-        const offscreen = compositeAllLayers(
-          layers,
-          canvasWidth,
-          canvasHeight,
-          backgroundColor,
-          1, // render at 1x scale; CSS zoom handles display scaling
-          100,
-          false, // apply all effects including filters
-        );
+    displayCanvas.width = offscreen.width;
+    displayCanvas.height = offscreen.height;
+    const ctx = displayCanvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+      ctx.drawImage(offscreen, 0, 0);
+    }
 
-        displayCanvas.width = offscreen.width;
-        displayCanvas.height = offscreen.height;
-        const ctx = displayCanvas.getContext('2d');
-        if (ctx) {
-          ctx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
-          ctx.drawImage(offscreen, 0, 0);
-        }
-      }
-
-      rafRef.current = requestAnimationFrame(renderFrame);
-    };
-
-    rafRef.current = requestAnimationFrame(renderFrame);
-
-    return () => {
-      mounted = false;
-      cancelAnimationFrame(rafRef.current);
-    };
+    console.debug(`[CPU] composite: ${(performance.now() - t0).toFixed(1)}ms`);
   }, [layers, canvasWidth, canvasHeight, backgroundColor]);
 
   // ---------------------------------------------------------------------------

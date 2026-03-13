@@ -134,7 +134,7 @@ pub struct GroupData {
 
 /// Type-specific data for a node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type")]
 pub enum NodeKind {
     Image(ImageData),
     Text(TextProperties),

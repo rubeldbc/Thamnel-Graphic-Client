@@ -63,6 +63,14 @@ const MAX_UNDO = 50;
 
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** Monotonic counter incremented each time Rust document sync completes. */
+let _rustSyncVersion = 0;
+
+/** Get the current Rust sync version (used by GPU renderer to detect fresh data). */
+export function getRustSyncVersion(): number {
+  return _rustSyncVersion;
+}
+
 /** Derive DocumentModel from ProjectModel and push to Rust. */
 function syncProjectToRust(project: ProjectModel): void {
   if (syncTimer) {
@@ -72,13 +80,17 @@ function syncProjectToRust(project: ProjectModel): void {
   syncTimer = setTimeout(() => {
     try {
       const doc = legacyProjectToDocument(project);
-      rustSetDocument(doc).catch(() => {
-        // Silently ignore — Tauri runtime may not be available in dev/test
-      });
+      rustSetDocument(doc)
+        .then(() => {
+          _rustSyncVersion += 1;
+        })
+        .catch(() => {
+          // Silently ignore — Tauri runtime may not be available in dev/test
+        });
     } catch {
       // Conversion error — non-fatal
     }
-  }, 50);
+  }, 16); // reduced from 50ms to ~1 frame for faster GPU sync
 }
 
 const defaultProject = createDefaultProject();
