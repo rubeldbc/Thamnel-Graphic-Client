@@ -10,4 +10,4 @@ export {
   clearLayerCache,
   invalidateLayer,
 } from './layerRenderer';
-export { compositeAllLayers } from './compositor';
+export { compositeAllLayers, hasActiveEffects } from './compositor';

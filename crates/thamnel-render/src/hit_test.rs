@@ -73,9 +73,9 @@ pub fn point_in_node_precise(px: f64, py: f64, node: &Node) -> bool {
 /// Find the topmost selectable node at a canvas-space point.
 ///
 /// Returns the node's UUID, or None if nothing was hit.
-/// Iterates from top (last in array) to bottom for proper z-order.
+/// Convention: index 0 = topmost — iterate forward for proper z-order.
 pub fn hit_test_point(doc: &Document, px: f64, py: f64) -> Option<Uuid> {
-    for node in doc.nodes.iter().rev() {
+    for node in &doc.nodes {
         if !is_node_selectable(node, &doc.nodes) {
             continue;
         }
@@ -87,9 +87,10 @@ pub fn hit_test_point(doc: &Document, px: f64, py: f64) -> Option<Uuid> {
 }
 
 /// Find ALL selectable nodes at a canvas-space point, ordered top-to-bottom.
+/// Convention: index 0 = topmost — iterate forward.
 pub fn hit_test_all(doc: &Document, px: f64, py: f64) -> Vec<Uuid> {
     let mut results = Vec::new();
-    for node in doc.nodes.iter().rev() {
+    for node in &doc.nodes {
         if !is_node_selectable(node, &doc.nodes) {
             continue;
         }

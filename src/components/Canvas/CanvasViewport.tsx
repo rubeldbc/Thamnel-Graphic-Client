@@ -11,7 +11,7 @@ import type { Bounds } from './HandleOverlay';
 import { useUiStore } from '../../stores/uiStore';
 import { useDocumentStore } from '../../stores/documentStore';
 import { useUndoRedoStore } from '../../stores/undoRedoStore';
-import { compositeAllLayers } from '../../engine/compositor';
+import { compositeAllLayers, hasActiveEffects } from '../../engine/compositor';
 import { getShapeTightBounds } from '../../engine/shapeRenderer';
 import { useSelectionManager } from '../../hooks/useSelectionManager';
 import { useSmartGuides } from '../../hooks/useSmartGuides';
@@ -135,7 +135,7 @@ export function CanvasViewport({
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasSurfaceRef = useRef<HTMLDivElement>(null);
   const renderCanvasRef = useRef<HTMLCanvasElement>(null);
-  // (rafRef removed — CPU compositor no longer uses a RAF loop)
+  const [gpuWarmedUp, setGpuWarmedUp] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Get selected layers helper
@@ -702,6 +702,11 @@ export function CanvasViewport({
     enabled: true,
   });
 
+  // Mark GPU as warmed up once the first frame renders successfully
+  useEffect(() => {
+    if (gpuActive && !gpuWarmedUp) setGpuWarmedUp(true);
+  }, [gpuActive, gpuWarmedUp]);
+
   // During interactive drags (move/resize/rotate), bypass the GPU renderer
   // and fall back to the CPU compositor. The GPU IPC roundtrip is ~60ms per
   // frame which causes visible lag between the selection handles and the
@@ -713,21 +718,30 @@ export function CanvasViewport({
     interaction.dragMode !== 'marqueeSelect' &&
     interaction.dragMode !== 'drawShape';
 
-  const effectiveGpuActive = gpuActive && !isInteracting;
+  // The GPU renderer (Rust wgpu+Vello) does not implement per-layer effects
+  // yet (brightness, contrast, blur, etc.). When any visible layer has active
+  // effects, fall back to the CPU compositor which applies them.
+  const layersHaveEffects = useMemo(
+    () => layers.some((l) => l.visible && hasActiveEffects(l)),
+    [layers],
+  );
+
+  const effectiveGpuActive = gpuActive && !isInteracting && !layersHaveEffects;
 
   // Suppress GPU render dispatches while the CPU compositor is handling
   // interactive rendering — avoids wasting IPC bandwidth during drags.
   useEffect(() => {
-    if (gpuActive && isInteracting) {
+    if (gpuActive && !effectiveGpuActive) {
       useDocumentStore.getState().setSuppressRender(true);
       return () => { useDocumentStore.getState().setSuppressRender(false); };
     }
-  }, [gpuActive, isInteracting]);
+  }, [gpuActive, effectiveGpuActive]);
 
-  // CPU compositor: fallback when GPU renderer is not active or during
-  // interactive drag operations for instant visual feedback.
+  // CPU compositor: fallback when GPU renderer is not active, during
+  // interactive drag operations, or when layers have active effects.
   // useLayoutEffect ensures the canvas updates in the same paint frame as
   // the HandleOverlay, so the image moves in sync with the selection box.
+  // interactiveMode=true only during drags (skips effects for drag speed).
   useLayoutEffect(() => {
     if (effectiveGpuActive) return; // GPU handles rendering — skip CPU fallback
 
@@ -742,7 +756,7 @@ export function CanvasViewport({
       backgroundColor,
       1, // render at 1x scale; CSS zoom handles display scaling
       100,
-      true, // interactive mode: skip expensive effects for speed
+      false, // always apply effects for visual consistency during editing
     );
 
     displayCanvas.width = offscreen.width;
@@ -753,6 +767,7 @@ export function CanvasViewport({
       ctx.drawImage(offscreen, 0, 0);
     }
 
+    if (!gpuWarmedUp) setGpuWarmedUp(true);
     console.debug(`[CPU] composite: ${(performance.now() - t0).toFixed(1)}ms`);
   }, [layers, canvasWidth, canvasHeight, backgroundColor, effectiveGpuActive]);
 
@@ -889,6 +904,42 @@ export function CanvasViewport({
                   pointerEvents: 'none',
                 }}
               />
+
+              {/* Loading overlay while GPU pipeline warms up */}
+              {!gpuWarmedUp && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    pointerEvents: 'none',
+                    zIndex: 10,
+                  }}
+                >
+                  <div style={{ textAlign: 'center', color: '#aaa' }}>
+                    <div
+                      style={{
+                        width: 32,
+                        height: 32,
+                        margin: '0 auto 8px',
+                        border: '3px solid #444',
+                        borderTopColor: '#FF6600',
+                        borderRadius: '50%',
+                        animation: 'spin 0.8s linear infinite',
+                      }}
+                    />
+                    <span style={{ fontSize: 13, fontFamily: 'system-ui' }}>
+                      Initializing GPU…
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Layer 3: GridOverlay */}
               <GridOverlay

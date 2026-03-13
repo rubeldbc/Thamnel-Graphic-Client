@@ -49,8 +49,9 @@ pub fn build_document_scene(
         &canvas_rect,
     );
 
-    // Render each visible node in order (bottom to top)
-    for node in &doc.nodes {
+    // Convention: index 0 = topmost (front). Render in reverse so bottom
+    // layers are drawn first and index 0 is drawn last (on top).
+    for node in doc.nodes.iter().rev() {
         if !node.base.visible {
             continue;
         }

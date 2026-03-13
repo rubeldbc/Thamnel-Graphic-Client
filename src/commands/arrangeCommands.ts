@@ -13,15 +13,16 @@ function selectedIndex(): number {
   );
 }
 
-function notAtTop(): boolean {
+// Convention: index 0 = topmost (front), last index = bottommost (back)
+function notAtFront(): boolean {
+  const idx = selectedIndex();
+  return idx > 0;
+}
+
+function notAtBack(): boolean {
   const state = useDocumentStore.getState();
   const idx = selectedIndex();
   return idx >= 0 && idx < state.project.layers.length - 1;
-}
-
-function notAtBottom(): boolean {
-  const idx = selectedIndex();
-  return idx > 0;
 }
 
 export const bringToFront: Command = {
@@ -34,7 +35,7 @@ export const bringToFront: Command = {
     state.pushUndo();
     const id = state.selectedLayerIds[0];
     if (id) {
-      state.moveLayer(id, state.project.layers.length - 1);
+      state.moveLayer(id, 0); // index 0 = topmost
     }
   },
 };
@@ -49,7 +50,7 @@ export const sendToBack: Command = {
     state.pushUndo();
     const id = state.selectedLayerIds[0];
     if (id) {
-      state.moveLayer(id, 0);
+      state.moveLayer(id, state.project.layers.length - 1); // last index = bottommost
     }
   },
 };
@@ -58,14 +59,14 @@ export const bringForward: Command = {
   name: 'bringForward',
   shortcut: 'Ctrl+]',
   category: 'arrange',
-  canExecute: () => hasSelection() && notAtTop(),
+  canExecute: () => hasSelection() && notAtFront(),
   execute: () => {
     const state = useDocumentStore.getState();
     state.pushUndo();
     const id = state.selectedLayerIds[0];
     const idx = selectedIndex();
-    if (id && idx >= 0) {
-      state.moveLayer(id, idx + 1);
+    if (id && idx > 0) {
+      state.moveLayer(id, idx - 1); // lower index = closer to front
     }
   },
 };
@@ -74,14 +75,14 @@ export const sendBackward: Command = {
   name: 'sendBackward',
   shortcut: 'Ctrl+[',
   category: 'arrange',
-  canExecute: () => hasSelection() && notAtBottom(),
+  canExecute: () => hasSelection() && notAtBack(),
   execute: () => {
     const state = useDocumentStore.getState();
     state.pushUndo();
     const id = state.selectedLayerIds[0];
     const idx = selectedIndex();
-    if (id && idx > 0) {
-      state.moveLayer(id, idx - 1);
+    if (id && idx >= 0) {
+      state.moveLayer(id, idx + 1); // higher index = closer to back
     }
   },
 };

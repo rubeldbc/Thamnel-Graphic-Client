@@ -1,4 +1,6 @@
 import type { LayerEffect, ColorAdjustments } from '../types/LayerEffect';
+import type { BlendMode } from '../types/enums';
+import { getCompositeOperation } from './blendModes';
 
 // ---------------------------------------------------------------------------
 // Helpers – offscreen canvas creation
@@ -84,6 +86,53 @@ export function applyEffects(
   if (effects.colorTintEnabled && effects.colorTintIntensity > 0) {
     current = applyColorTint(current, effects.colorTintColor, effects.colorTintIntensity);
   }
+
+  // ---- Stroke / outline effects ----
+  if (effects.cutStrokeEnabled && effects.cutStrokeWidth > 0) {
+    current = applyCutStroke(current, effects.cutStrokeColor, effects.cutStrokeWidth);
+  }
+  if (effects.smoothStrokeEnabled && effects.smoothStrokeWidth > 0) {
+    current = applySmoothStroke(
+      current,
+      effects.smoothStrokeColor,
+      effects.smoothStrokeWidth,
+      effects.smoothStrokeOpacity,
+    );
+  }
+
+  // ---- Lighting effects ----
+  if (effects.rimLightEnabled && effects.rimLightWidth > 0 && effects.rimLightIntensity > 0) {
+    current = applyRimLight(
+      current,
+      effects.rimLightColor,
+      effects.rimLightAngle,
+      effects.rimLightIntensity,
+      effects.rimLightWidth,
+    );
+  }
+
+  // ---- Color grading ----
+  if (effects.splitToningEnabled) {
+    current = applySplitToning(
+      current,
+      effects.splitToningHighlightColor,
+      effects.splitToningShadowColor,
+      effects.splitToningBalance,
+    );
+  }
+
+  // ---- Blend overlay ----
+  if (effects.blendOverlayEnabled && effects.blendOverlayImage) {
+    current = applyBlendOverlay(
+      current,
+      effects.blendOverlayImage,
+      effects.blendOverlayOpacity,
+      effects.blendOverlayMode,
+    );
+  }
+
+  // NOTE: Drop shadow and outer glow are applied at the compositor level
+  // using the canvas shadow API so they can extend beyond layer bounds.
 
   return current;
 }
@@ -304,5 +353,243 @@ function applyColorTint(
   // Reset
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: parse hex color
+// ---------------------------------------------------------------------------
+function parseHexColor(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace('#', '');
+  return {
+    r: parseInt(h.substring(0, 2), 16) || 0,
+    g: parseInt(h.substring(2, 4), 16) || 0,
+    b: parseInt(h.substring(4, 6), 16) || 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Cut Stroke (hard outline around non-transparent content)
+// ---------------------------------------------------------------------------
+function applyCutStroke(
+  source: HTMLCanvasElement,
+  color: string,
+  width: number,
+): HTMLCanvasElement {
+  const w = source.width;
+  const h = source.height;
+  if (w === 0 || h === 0 || width <= 0) return source;
+
+  const out = createOffscreen(w, h);
+  const ctx = out.getContext('2d')!;
+
+  // Create a colored silhouette of the source
+  const silhouette = createOffscreen(w, h);
+  const sCtx = silhouette.getContext('2d')!;
+  sCtx.drawImage(source, 0, 0);
+  sCtx.globalCompositeOperation = 'source-in';
+  sCtx.fillStyle = color;
+  sCtx.fillRect(0, 0, w, h);
+
+  // Draw silhouette offset in all directions to create the stroke ring
+  const strokePx = Math.max(1, Math.round(width));
+  const steps = Math.max(16, strokePx * 4);
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * Math.PI * 2;
+    ctx.drawImage(
+      silhouette,
+      Math.cos(angle) * strokePx,
+      Math.sin(angle) * strokePx,
+    );
+  }
+
+  // Draw original on top so the stroke surrounds the content
+  ctx.drawImage(source, 0, 0);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Smooth Stroke (anti-aliased / blurred outline)
+// ---------------------------------------------------------------------------
+function applySmoothStroke(
+  source: HTMLCanvasElement,
+  color: string,
+  width: number,
+  opacity: number,
+): HTMLCanvasElement {
+  const w = source.width;
+  const h = source.height;
+  if (w === 0 || h === 0 || width <= 0) return source;
+
+  const out = createOffscreen(w, h);
+  const ctx = out.getContext('2d')!;
+
+  // Create a blurred colored silhouette
+  const silhouette = createOffscreen(w, h);
+  const sCtx = silhouette.getContext('2d')!;
+  sCtx.drawImage(source, 0, 0);
+  sCtx.globalCompositeOperation = 'source-in';
+  sCtx.fillStyle = color;
+  sCtx.fillRect(0, 0, w, h);
+
+  const blurred = createOffscreen(w, h);
+  const bCtx = blurred.getContext('2d')!;
+  bCtx.filter = `blur(${Math.max(1, width / 2)}px)`;
+  bCtx.drawImage(silhouette, 0, 0);
+  bCtx.filter = 'none';
+
+  // Draw blurred silhouette offset in all directions
+  const strokePx = Math.max(1, Math.round(width));
+  const steps = Math.max(16, strokePx * 4);
+  ctx.globalAlpha = Math.min(1, opacity);
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * Math.PI * 2;
+    ctx.drawImage(
+      blurred,
+      Math.cos(angle) * strokePx,
+      Math.sin(angle) * strokePx,
+    );
+  }
+  ctx.globalAlpha = 1;
+
+  // Draw original on top
+  ctx.drawImage(source, 0, 0);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Rim Light (directional edge highlight)
+// ---------------------------------------------------------------------------
+function applyRimLight(
+  source: HTMLCanvasElement,
+  color: string,
+  angle: number,
+  intensity: number,
+  width: number,
+): HTMLCanvasElement {
+  const w = source.width;
+  const h = source.height;
+  if (w === 0 || h === 0) return source;
+
+  const out = createOffscreen(w, h);
+  const ctx = out.getContext('2d')!;
+
+  // Create a blurred light-colored silhouette
+  const silhouette = createOffscreen(w, h);
+  const sCtx = silhouette.getContext('2d')!;
+  sCtx.drawImage(source, 0, 0);
+  sCtx.globalCompositeOperation = 'source-in';
+  sCtx.fillStyle = color;
+  sCtx.fillRect(0, 0, w, h);
+
+  const blurred = createOffscreen(w, h);
+  const bCtx = blurred.getContext('2d')!;
+  bCtx.filter = `blur(${Math.max(1, width)}px)`;
+  bCtx.drawImage(silhouette, 0, 0);
+  bCtx.filter = 'none';
+
+  // Draw original
+  ctx.drawImage(source, 0, 0);
+
+  // Offset light from one direction using additive blending
+  const rad = (angle * Math.PI) / 180;
+  const offsetX = Math.cos(rad) * width;
+  const offsetY = Math.sin(rad) * width;
+
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = Math.min(1, intensity / 100);
+  ctx.drawImage(blurred, offsetX, offsetY);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+
+  // Clip to original alpha so light doesn't bleed outside
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(source, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Split Toning (highlight / shadow colour grading)
+// ---------------------------------------------------------------------------
+function applySplitToning(
+  source: HTMLCanvasElement,
+  highlightColor: string,
+  shadowColor: string,
+  balance: number,
+): HTMLCanvasElement {
+  const w = source.width;
+  const h = source.height;
+  if (w === 0 || h === 0) return source;
+
+  const out = createOffscreen(w, h);
+  const ctx = out.getContext('2d')!;
+  ctx.drawImage(source, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+
+  const hc = parseHexColor(highlightColor);
+  const sc = parseHexColor(shadowColor);
+
+  // Balance shifts the luminance midpoint (-100..100 => 64..192)
+  const midpoint = 128 + (balance / 100) * 64;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+
+    if (lum > midpoint) {
+      // Tint highlights
+      const t = Math.min(1, (lum - midpoint) / (255 - midpoint)) * 0.3;
+      data[i] = Math.max(0, Math.min(255, data[i] + (hc.r - 128) * t));
+      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + (hc.g - 128) * t));
+      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + (hc.b - 128) * t));
+    } else {
+      // Tint shadows
+      const t = Math.min(1, (midpoint - lum) / midpoint) * 0.3;
+      data[i] = Math.max(0, Math.min(255, data[i] + (sc.r - 128) * t));
+      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + (sc.g - 128) * t));
+      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + (sc.b - 128) * t));
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Blend Overlay (composite an overlay image with a blend mode)
+// ---------------------------------------------------------------------------
+const overlayImageCache = new Map<string, HTMLImageElement>();
+
+function applyBlendOverlay(
+  source: HTMLCanvasElement,
+  imageUrl: string,
+  opacity: number,
+  mode: BlendMode,
+): HTMLCanvasElement {
+  // Use cached image if available; otherwise trigger async load for next frame
+  let img = overlayImageCache.get(imageUrl);
+  if (!img) {
+    img = new Image();
+    img.src = imageUrl;
+    overlayImageCache.set(imageUrl, img);
+  }
+  if (!img.complete || img.naturalWidth === 0) return source;
+
+  const w = source.width;
+  const h = source.height;
+  const out = createOffscreen(w, h);
+  const ctx = out.getContext('2d')!;
+
+  ctx.drawImage(source, 0, 0);
+
+  ctx.globalCompositeOperation = getCompositeOperation(mode);
+  ctx.globalAlpha = Math.min(1, opacity / 100);
+  ctx.drawImage(img, 0, 0, w, h);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+
   return out;
 }

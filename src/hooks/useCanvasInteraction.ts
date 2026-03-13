@@ -499,12 +499,20 @@ export function useCanvasInteraction(
   const [marqueeRect, setMarqueeRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [dragStartState, setDragStartState] = useState<DragStartState | null>(null);
 
+  // Refs mirror state for the global mouseup handler so it never sees stale closures
+  const isDraggingRef = useRef(false);
+  const interactionModeRef = useRef<InteractionMode>('idle');
+
   const dragStartRef = useRef<DragStartState | null>(null);
   // Store the raw end point for line drawing (before normalization)
   const lineEndRef = useRef<{ x: number; y: number } | null>(null);
   // Polyline drawing state (click-to-place line mode)
   const [polylinePoints, setPolylinePoints] = useState<Array<{ x: number; y: number }>>([]);
   const [polylinePreviewPoint, setPolylinePreviewPoint] = useState<{ x: number; y: number } | null>(null);
+
+  // Keep refs in sync with state (read by global mouseup handler)
+  isDraggingRef.current = isDragging;
+  interactionModeRef.current = interactionMode;
 
   const updateModifiers = useCallback((e: React.MouseEvent | React.WheelEvent) => {
     setModifiers({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey });
@@ -1307,11 +1315,17 @@ export function useCanvasInteraction(
     return () => window.removeEventListener('contextmenu', preventCtx);
   }, [polylinePoints.length]);
 
-  // Clean up drag state if mouse leaves window
+  // Clean up drag state if mouse leaves window.
+  // Uses refs instead of state in the dependency array so the listener is
+  // registered once and always reads the latest values — avoids stale-closure
+  // race conditions that caused stuck drags and phantom movement.
+  const smartGuidesRef = useRef(smartGuides);
+  smartGuidesRef.current = smartGuides;
+
   useEffect(() => {
     const handleGlobalUp = () => {
-      if (isDragging) {
-        smartGuides?.clearGuides();
+      if (isDraggingRef.current) {
+        smartGuidesRef.current?.clearGuides();
         setIsDragging(false);
         dragStartRef.current = null;
         setDragStartState(null);
@@ -1320,14 +1334,15 @@ export function useCanvasInteraction(
         setActiveHandle(null);
         setMarqueeRect(null);
         setCursor('default');
-        if (interactionMode === 'pan' || interactionMode === 'crop') {
+        const mode = interactionModeRef.current;
+        if (mode === 'pan' || mode === 'crop') {
           setInteractionMode('idle');
         }
       }
     };
     window.addEventListener('mouseup', handleGlobalUp);
     return () => window.removeEventListener('mouseup', handleGlobalUp);
-  }, [isDragging, interactionMode, smartGuides]);
+  }, []); // stable — reads from refs
 
   return {
     interactionMode,

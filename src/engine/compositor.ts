@@ -7,9 +7,20 @@ import { fillShape } from './shapeRenderer';
 import { applyEffects, applyColorAdjustments } from './effectsEngine';
 
 // ---------------------------------------------------------------------------
+// Helper: convert hex color + alpha to rgba() string
+// ---------------------------------------------------------------------------
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16) || 0;
+  const g = parseInt(h.substring(2, 4), 16) || 0;
+  const b = parseInt(h.substring(4, 6), 16) || 0;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ---------------------------------------------------------------------------
 // hasActiveEffects – check if a layer has any active post-processing effects
 // ---------------------------------------------------------------------------
-function hasActiveEffects(layer: LayerModel): boolean {
+export function hasActiveEffects(layer: LayerModel): boolean {
   const e = layer.effects;
   if (
     (e.brightnessEnabled && e.brightness !== 0) ||
@@ -66,10 +77,11 @@ export function compositeAllLayers(
   ctx.fillStyle = backgroundColor;
   ctx.fillRect(0, 0, displayWidth, displayHeight);
 
-  // Collect visible non-group layers in bottom-to-top order (array order = bottom first)
-  const visibleLayers = layers.filter(
-    (l) => l.type !== 'group' && getEffectiveVisibility(l, layers),
-  );
+  // Collect visible non-group layers. Convention: index 0 = topmost (front).
+  // Reverse so we draw bottom layers first, topmost (index 0) last (on top).
+  const visibleLayers = layers
+    .filter((l) => l.type !== 'group' && getEffectiveVisibility(l, layers))
+    .reverse();
 
   for (const layer of visibleLayers) {
     // Set blend mode
@@ -163,7 +175,45 @@ export function compositeAllLayers(
         ctx.scale(flipX, flipY);
       }
 
+      // Outer glow: draw a pre-pass with canvas shadow (0 offset)
+      const hasGlow = !interactiveMode &&
+        layer.effects.outerGlowEnabled &&
+        layer.effects.outerGlowRadius > 0;
+      const hasShadow = !interactiveMode &&
+        layer.effects.dropShadowEnabled &&
+        (layer.effects.dropShadowBlur > 0 ||
+         layer.effects.dropShadowOffsetX !== 0 ||
+         layer.effects.dropShadowOffsetY !== 0);
+
+      if (hasGlow) {
+        const glowAlpha = Math.min(1, (layer.effects.outerGlowIntensity ?? 100) / 100);
+        ctx.shadowColor = hexToRgba(layer.effects.outerGlowColor, glowAlpha);
+        ctx.shadowBlur = layer.effects.outerGlowRadius * scale;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.drawImage(layerCanvas, -anchorPxX, -anchorPxY, drawW, drawH);
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+      }
+
+      // Drop shadow: set shadow on the main draw call
+      if (hasShadow) {
+        const shadowAlpha = Math.min(1, (layer.effects.dropShadowOpacity ?? 100) / 100);
+        ctx.shadowColor = hexToRgba(layer.effects.dropShadowColor, shadowAlpha);
+        ctx.shadowBlur = layer.effects.dropShadowBlur * scale;
+        ctx.shadowOffsetX = layer.effects.dropShadowOffsetX * scale;
+        ctx.shadowOffsetY = layer.effects.dropShadowOffsetY * scale;
+      }
+
       ctx.drawImage(layerCanvas, -anchorPxX, -anchorPxY, drawW, drawH);
+
+      // Reset shadow state
+      if (hasShadow || hasGlow) {
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+      }
 
       ctx.restore();
     }

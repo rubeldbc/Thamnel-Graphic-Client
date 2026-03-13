@@ -296,7 +296,7 @@ export function useSelectionManager(): SelectionManagerResult {
 
   /**
    * Hit-test: find the topmost selectable layer at a given point.
-   * Checks from top (last in array = topmost) down; first hit wins.
+   * Convention: index 0 = topmost. Iterate forward; first hit wins.
    */
   const hitTestPoint = useCallback(
     (
@@ -304,8 +304,8 @@ export function useSelectionManager(): SelectionManagerResult {
       py: number,
       layers: LayerModel[],
     ): LayerModel | null => {
-      // Iterate from top layer down
-      for (let i = layers.length - 1; i >= 0; i--) {
+      // Iterate from top layer (index 0) down
+      for (let i = 0; i < layers.length; i++) {
         const layer = layers[i];
         if (!isLayerSelectable(layer, layers)) continue;
 
@@ -366,11 +366,12 @@ export function useSelectionManager(): SelectionManagerResult {
 
   /**
    * Hit-test: find ALL selectable layers at a given point, ordered top-to-bottom.
+   * Convention: index 0 = topmost, so iterate forward.
    */
   const hitTestAll = useCallback(
     (px: number, py: number, layers: LayerModel[]): LayerModel[] => {
       const hits: LayerModel[] = [];
-      for (let i = layers.length - 1; i >= 0; i--) {
+      for (let i = 0; i < layers.length; i++) {
         const layer = layers[i];
         if (!isLayerSelectable(layer, layers)) continue;
         if (

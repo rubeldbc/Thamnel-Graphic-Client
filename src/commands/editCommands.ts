@@ -70,9 +70,9 @@ export const pasteLayer: Command = {
     store.pushUndo();
     const newIds: string[] = [];
     for (const layer of clipboard) {
-      // Insert above the source layer position
+      // Insert above (in front of) the source layer — index 0 = topmost
       const sourceIdx = store.project.layers.findIndex((l) => l.id === layer.id);
-      const insertIdx = sourceIdx !== -1 ? sourceIdx : store.project.layers.length;
+      const insertIdx = sourceIdx !== -1 ? sourceIdx : 0;
       const pasted = createDefaultLayer({
         ...layer,
         id: undefined, // generate new id
@@ -117,9 +117,9 @@ export const duplicateLayer: Command = {
     );
     const newIds: string[] = [];
     for (const layer of selected) {
-      // Insert above the source layer
+      // Insert above (in front of) the source layer — index 0 = topmost
       const sourceIdx = useDocumentStore.getState().project.layers.findIndex((l) => l.id === layer.id);
-      const insertIdx = sourceIdx !== -1 ? sourceIdx : useDocumentStore.getState().project.layers.length;
+      const insertIdx = sourceIdx !== -1 ? sourceIdx : 0;
       const dup = createDefaultLayer({
         ...layer,
         id: undefined,

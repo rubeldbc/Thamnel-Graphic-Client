@@ -118,12 +118,23 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
 
   addLayer: (layer) => {
     dlog.imageInfo(`Layer added: "${layer.name}" (${layer.type}, ${layer.id.slice(0, 8)})`);
-    set((state) => ({
-      project: {
-        ...state.project,
-        layers: [...state.project.layers, layer],
-      },
-    }));
+    set((state) => {
+      const layers = [...state.project.layers];
+      // Convention: index 0 = topmost.
+      // Insert above (in front of) the selected layer; if no selection, add at top (index 0).
+      const sel = state.selectedLayerIds;
+      if (sel.length > 0) {
+        let minIdx = layers.length;
+        for (const id of sel) {
+          const idx = layers.findIndex((l) => l.id === id);
+          if (idx >= 0 && idx < minIdx) minIdx = idx;
+        }
+        layers.splice(minIdx, 0, layer);
+        return { project: { ...state.project, layers } };
+      }
+      layers.unshift(layer); // index 0 = topmost
+      return { project: { ...state.project, layers } };
+    });
   },
 
   addLayerAtIndex: (layer, index) => {
