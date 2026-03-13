@@ -31,7 +31,31 @@ before proceeding to the next phase. This includes:
 
 **Do NOT start the next phase until every check passes.**
 
-### 2. Code Quality Standards
+### 2. Shape Creation System — KEEP AS-IS
+
+The current shape creation system (drawing interaction, tool behavior, polyline click-to-place)
+**must be preserved exactly as it works today**. This includes:
+
+- `useCanvasInteraction.ts` — mouse/keyboard interaction for shape drawing stays in TypeScript
+- `useShapeDrawTool.ts` — shape draw tool logic stays in TypeScript
+- `ShapePreviewOverlay.tsx` — live preview during drawing stays in TypeScript
+- `CanvasViewport.tsx` — `handleShapeDrawn`, `handlePolylineDrawn` callbacks stay in TypeScript
+- All 27 shape types, polyline drawing, shift-snap to 45° — behavior unchanged
+
+**What changes**: Only the **rendering** of already-created shapes moves to Rust (kurbo paths
+rendered by Vello). The shape creation interaction (how the user draws shapes with mouse clicks
+and drags) stays entirely in the React/TypeScript frontend.
+
+**Allowed**: Use kurbo, Vello, or any Rust library for **rendering** the shape paths after
+creation. The Rust side converts `ShapeType` + `ShapeProperties` into kurbo/Vello paths
+for display. But the creation UX — the click, drag, polyline point placement, preview
+overlay — is NOT touched.
+
+**GC_Core_Plan.md note**: The plan mentions shapes created in a "separate Shape Creator window."
+That is a **future feature**. The current inline canvas shape drawing system is kept. The
+separate window may be added later alongside the current system, not as a replacement.
+
+### 3. Code Quality Standards
 
 All code — Rust and TypeScript — must follow these standards at every step:
 
