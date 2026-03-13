@@ -280,10 +280,10 @@ export function DebugWindow({ open, onOpenChange }: DebugWindowProps) {
 
   return (
     <>
-      {/* Semi-transparent backdrop — only close on direct click, not during drag */}
+      {/* Transparent backdrop — only close on direct click, not during drag */}
       <div
         className="fixed inset-0 z-50"
-        style={{ backgroundColor: 'rgba(0, 0, 0, 0.4)' }}
+        style={{ backgroundColor: 'transparent' }}
         onMouseDown={(e) => {
           // Only close if the click target is the backdrop itself
           if (e.target === e.currentTarget) {

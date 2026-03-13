@@ -147,7 +147,7 @@ export function ShapeDrawingWindow({ open, onOpenChange, onSendToCanvas }: Shape
       <Dialog.Portal>
         <Dialog.Overlay
           className="fixed inset-0 z-50"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)' }}
+          style={{ backgroundColor: 'transparent' }}
         />
         <Dialog.Content
           data-testid="shape-drawing-dialog"

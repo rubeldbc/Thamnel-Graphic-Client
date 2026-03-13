@@ -46,7 +46,7 @@ export function DialogBase({
       <Dialog.Portal>
         <Dialog.Overlay
           className="fixed inset-0 z-50"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)' }}
+          style={{ backgroundColor: 'transparent' }}
           data-testid={`${testId}-overlay`}
         />
         <Dialog.Content

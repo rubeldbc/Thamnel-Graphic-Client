@@ -41,7 +41,7 @@ export function FramePreviewWindow({
       <Dialog.Portal>
         <Dialog.Overlay
           className="fixed inset-0 z-50"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.88)' }}
+          style={{ backgroundColor: 'transparent' }}
           onClick={() => onOpenChange(false)}
           data-testid="frame-preview-overlay"
         />

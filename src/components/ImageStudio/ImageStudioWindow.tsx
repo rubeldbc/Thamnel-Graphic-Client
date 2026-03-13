@@ -159,7 +159,7 @@ export function ImageStudioWindow({
       <Dialog.Portal>
         <Dialog.Overlay
           className="fixed inset-0 z-50"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
+          style={{ backgroundColor: 'transparent' }}
           data-testid="image-studio-overlay"
         />
         <Dialog.Content
