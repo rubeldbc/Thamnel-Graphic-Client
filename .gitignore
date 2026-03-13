@@ -12,7 +12,8 @@ dist
 dist-ssr
 *.local
 
-# Tauri build output
+# Rust build output
+target
 src-tauri/target
 
 # Editor directories and files

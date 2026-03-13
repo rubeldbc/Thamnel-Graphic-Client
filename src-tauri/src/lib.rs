@@ -1,5 +1,6 @@
 mod commands;
 mod document_bridge;
+mod render_bridge;
 mod settings;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -9,6 +10,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(document_bridge::AppDocumentState::default())
+        .manage(render_bridge::AppRenderState::default())
         .invoke_handler(tauri::generate_handler![
             // Existing
             commands::greet,
@@ -41,6 +43,9 @@ pub fn run() {
             document_bridge::redo_document,
             document_bridge::get_history_state,
             document_bridge::load_legacy_rbl,
+            // Render bridge (Phase 2)
+            render_bridge::render_frame,
+            render_bridge::export_render,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
