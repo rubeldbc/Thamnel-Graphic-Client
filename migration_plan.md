@@ -3,7 +3,7 @@
 ## Scope
 
 Migrate **only what currently exists and works** from TypeScript Canvas to Rust wgpu+Vello.
-Do NOT build new features. Do NOT add text rendering, AI, networking, or batch export.
+Do NOT build new features. Do NOT add AI, networking, or batch export.
 The app must compile, launch, and function identically at the end of every phase.
 
 ---
@@ -55,7 +55,42 @@ overlay — is NOT touched.
 That is a **future feature**. The current inline canvas shape drawing system is kept. The
 separate window may be added later alongside the current system, not as a replacement.
 
-### 3. Code Quality Standards
+### 3. Text System — Migrate Existing + Prepare for cosmic-text
+
+Text functionality already exists in the codebase and **must be migrated**, not skipped:
+
+**Currently working text features (KEEP all behavior):**
+- `src/engine/textRenderer.ts` — full text rendering (word wrap, styled runs, alignment,
+  shadows, backgrounds, underline, strikethrough, letter spacing, text transform)
+- `src/components/Canvas/InlineTextEditor.tsx` — inline text editing overlay (double-click
+  to edit, Ctrl+Enter commit, Escape cancel, debounced live update)
+- `src/hooks/useTextDrawTool.ts` — text draw tool (drag rectangle to create text layer)
+- `src/components/RightPanel/Properties/TextExpander.tsx` — text properties panel
+- `src/types/TextProperties.ts` — text data model (TextProperties, StyledRun)
+
+**Migration approach:**
+- **Phase 0**: `text.rs` in thamnel-core mirrors the existing `TextProperties` data model
+- **Phase 1**: TypeScript TextProperties type updated to mirror Rust struct
+- **Phase 2**: Text rendering in Rust replaces `textRenderer.ts`. Use **cosmic-text**
+  for text layout and shaping, rendered via Vello. Must reproduce all existing features:
+  word wrap, styled runs, alignment, shadows, text backgrounds, underline/strikethrough.
+- **Text creation UX stays in TypeScript**: `useTextDrawTool.ts` (drag to create),
+  `InlineTextEditor.tsx` (inline editing) — these are UI interactions, not rendering.
+
+**cosmic-text integration** (in thamnel-render, Phase 2):
+```rust
+// crates/thamnel-render/src/text_render.rs
+use cosmic_text::{FontSystem, SwashCache, Buffer, Metrics};
+
+pub fn layout_text(text_props: &TextProperties, width: f64, font_system: &mut FontSystem) -> Buffer { ... }
+pub fn render_text(scene: &mut vello::Scene, buffer: &Buffer, transform: &Transform) { ... }
+```
+
+This replaces `textRenderer.ts` entirely. After migration, the user will continue
+working on text improvements (multilingual, Bengali/Arabic support, better font
+management) using cosmic-text as the foundation.
+
+### 4. Code Quality Standards
 
 All code — Rust and TypeScript — must follow these standards at every step:
 
@@ -999,6 +1034,7 @@ crates/thamnel-render/
     ├── engine.rs           ← wgpu device/queue/surface setup
     ├── compositor.rs       ← Layer compositing, blend modes
     ├── shape_render.rs     ← All 27 shapes → kurbo paths → Vello
+    ├── text_render.rs      ← cosmic-text layout → Vello glyphs (replaces textRenderer.ts)
     ├── gizmo_render.rs     ← Selection handles, bounding boxes → Vello
     └── export.rs           ← PNG/JPG export via readback
 ```
@@ -1010,10 +1046,12 @@ thamnel-core = { path = "../thamnel-core" }
 wgpu = "24"
 vello = "0.4"
 kurbo = "0.11"
+cosmic-text = "0.12"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
 ```
 
-**NO cosmic-text yet** — text nodes render as colored bounding box with label (placeholder).
+**cosmic-text included** — text nodes render via cosmic-text + Vello, reproducing all
+existing text features (word wrap, styled runs, alignment, shadows, backgrounds).
 
 ### 2.2 — RenderBackend Trait
 
@@ -1048,7 +1086,47 @@ Must handle:
 - Polygon sides
 - Corner radius for rounded rectangle
 
-### 2.4 — Image Rendering
+### 2.4 — Text Rendering (cosmic-text)
+
+Replaces `textRenderer.ts`. All existing text features must work:
+
+```rust
+// crates/thamnel-render/src/text_render.rs
+
+/// Layout text using cosmic-text, matching current textRenderer.ts behavior.
+pub fn layout_text(
+    text_props: &TextProperties,
+    width: f64,
+    font_system: &mut FontSystem,
+) -> Buffer { ... }
+
+/// Render laid-out text to Vello scene.
+pub fn render_text(
+    scene: &mut vello::Scene,
+    buffer: &Buffer,
+    swash_cache: &mut SwashCache,
+    transform: &Affine,
+) { ... }
+```
+
+**Must reproduce these existing features from textRenderer.ts:**
+- Word wrapping within layer width
+- Styled runs (per-character weight, style, color, underline, strikethrough)
+- Text alignment (left, center, right, justify)
+- Text transform (uppercase, lowercase, capitalize)
+- Letter spacing
+- Line height
+- Text stroke (outline)
+- Text shadow (offsetX, offsetY, blur, color)
+- Text background (per-line background box with opacity, padding, corner radius)
+- Fill definition (solid color — gradient text is future work)
+
+**Font system initialization**: Load system fonts on startup via `cosmic_text::FontSystem::new()`.
+Font management improvements (bundled fonts, fallback chains) are future work built on this foundation.
+
+**Text creation UX unchanged**: `useTextDrawTool.ts`, `InlineTextEditor.tsx` stay in TypeScript.
+
+### 2.5 — Image Rendering
 
 Load base64 image data → decode → create Vello image brush → draw at layer position.
 
@@ -1058,7 +1136,7 @@ Must handle:
 - Opacity
 - Blend modes
 
-### 2.5 — Selection Gizmo Rendering
+### 2.6 — Selection Gizmo Rendering
 
 Replaces visual rendering from `HandleOverlay.tsx`. Draw via Vello:
 - Selection bounding box (orange/green border)
@@ -1068,7 +1146,7 @@ Replaces visual rendering from `HandleOverlay.tsx`. Draw via Vello:
 - Marquee selection rectangle
 - Smart guide lines
 
-### 2.6 — Effect Rendering
+### 2.7 — Effect Rendering
 
 Current effects from `effectsEngine.ts` re-implemented as wgpu operations
 within the Vello render pipeline.
@@ -1087,7 +1165,7 @@ within the Vello render pipeline.
 - Color tint, rim light, split toning
 - Cut stroke, smooth stroke
 
-### 2.7 — Tauri Frame Delivery
+### 2.8 — Tauri Frame Delivery
 
 ```rust
 // src-tauri/src/render_bridge.rs
@@ -1124,7 +1202,7 @@ const imageData = new ImageData(
 ctx.putImageData(imageData, 0, 0);
 ```
 
-### 2.8 — Swap Rendering
+### 2.9 — Swap Rendering
 
 Once Rust rendering matches TS rendering:
 
@@ -1150,13 +1228,15 @@ Keep `src/engine/index.ts` if any utility re-exports are still needed, otherwise
 
 - [ ] wgpu headless spike passes all 4 tests
 - [ ] All 27 shape types render correctly via Vello
+- [ ] Text renders via cosmic-text (word wrap, styled runs, alignment, shadows, backgrounds)
 - [ ] Image layers render with crop, flip, opacity, blend modes
 - [ ] All effects that currently work in TS also work in Rust
 - [ ] Selection gizmos rendered by Vello (handles, bounding box, anchor)
 - [ ] Frame delivery at 60fps (1920x1080)
-- [ ] Shapes are crisp at any zoom level (GPU vector rendering)
+- [ ] Shapes and text are crisp at any zoom level (GPU vector rendering)
 - [ ] Image export works via Rust readback
-- [ ] All TS engine files deleted
+- [ ] Text creation (drag to draw) and inline editing still work (TS side unchanged)
+- [ ] All TS engine files deleted (including textRenderer.ts)
 - [ ] Visual regression test: Rust output matches previous TS output
 
 ---
@@ -1338,7 +1418,8 @@ Delete tests that test deleted code (TS engine).
 4. **Test after every sub-step.** Run `cargo build`, `npm run build`, launch the app.
 5. **Full verification after every phase.** Run `cargo test --workspace`, `cargo clippy --workspace`,
    `npm run build`, and launch the app to verify all features work. See "Mandatory Rules" section.
-6. **Migrate only existing features.** Do NOT add cosmic-text, AI, networking, or .rbl ZIP.
+6. **Migrate only existing features.** Do NOT add AI, networking, or .rbl ZIP.
+   cosmic-text IS included (replaces textRenderer.ts in Phase 2).
 7. **Keep React UI identical.** Same look, same behavior, same interactions.
 8. **Commit at each sub-step boundary** with clear message describing what changed.
 9. **Write modular, refactored code.** No god-files, no duplication, no dead code.
