@@ -63,13 +63,20 @@ function InlineSlider({
   step?: number;
   onChange: (v: number) => void;
 }) {
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const pendingRef = useRef<number | null>(null);
 
   const handleChange = (v: number) => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      onChange(v);
-    }, 100);
+    pendingRef.current = v;
+    if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(() => {
+        if (pendingRef.current !== null) {
+          onChange(pendingRef.current);
+          pendingRef.current = null;
+        }
+        rafRef.current = null;
+      });
+    }
   };
 
   return (

@@ -11,6 +11,8 @@ export interface FrameThumbnailProps {
   onDoubleClick?: () => void;
   /** Thumbnail height in pixels. Width auto-calculated as 16:9 ratio. */
   thumbHeight?: number;
+  /** Whether to play the fade-in animation. */
+  animate?: boolean;
 }
 
 /**
@@ -24,13 +26,14 @@ export function FrameThumbnail({
   onClick,
   onDoubleClick,
   thumbHeight = 68,
+  animate = false,
 }: FrameThumbnailProps) {
   const thumbWidth = Math.round(thumbHeight * 16 / 9);
 
   return (
     <button
       data-testid="frame-thumbnail"
-      className="relative shrink-0 cursor-pointer overflow-hidden"
+      className={`relative shrink-0 cursor-pointer overflow-hidden${animate ? ' animate-fadeIn' : ''}`}
       style={{
         width: thumbWidth,
         height: thumbHeight,

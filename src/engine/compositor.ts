@@ -28,12 +28,17 @@ export function hasActiveEffects(layer: LayerModel): boolean {
     (e.saturationEnabled && e.saturation !== 0) ||
     (e.hueEnabled && e.hue !== 0) ||
     e.grayscale ||
+    e.sepia ||
+    e.invert ||
     (e.sharpenEnabled && e.sharpen > 0) ||
     (e.vignetteEnabled && e.vignette > 0) ||
     (e.pixelateEnabled && e.pixelate > 0) ||
     (e.noiseEnabled && e.noise > 0) ||
+    (e.posterizeEnabled && e.posterize > 0) ||
+    (e.colorTintEnabled && e.colorTintIntensity > 0) ||
     (e.gaussianBlurEnabled && e.gaussianBlur > 0) ||
-    (e.dropShadowEnabled && e.dropShadowBlur > 0) ||
+    (e.dropShadowEnabled &&
+      (e.dropShadowBlur > 0 || e.dropShadowOffsetX !== 0 || e.dropShadowOffsetY !== 0)) ||
     e.outerGlowEnabled ||
     e.cutStrokeEnabled ||
     e.rimLightEnabled ||

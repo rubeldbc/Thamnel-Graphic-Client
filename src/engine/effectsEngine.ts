@@ -202,8 +202,8 @@ function applySharpen(source: HTMLCanvasElement, amount: number): HTMLCanvasElem
   const outData = outCtx.createImageData(w, h);
   const dst = outData.data;
 
-  // Sharpening kernel (normalized by amount)
-  const k = amount / 100; // 0..1
+  // Sharpening kernel (amount is 0..1 from slider)
+  const k = amount;
   const center = 1 + 4 * k;
   const side = -k;
 
@@ -242,7 +242,7 @@ function applyVignette(source: HTMLCanvasElement, intensity: number): HTMLCanvas
   const cy = h / 2;
   const radius = Math.sqrt(cx * cx + cy * cy);
   const grad = ctx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, radius);
-  const alpha = Math.min(1, intensity / 100);
+  const alpha = Math.min(1, intensity);
   grad.addColorStop(0, 'rgba(0,0,0,0)');
   grad.addColorStop(1, `rgba(0,0,0,${alpha})`);
 
@@ -346,7 +346,7 @@ function applyColorTint(
   ctx.drawImage(source, 0, 0);
 
   ctx.globalCompositeOperation = 'multiply';
-  ctx.globalAlpha = Math.min(1, intensity / 100);
+  ctx.globalAlpha = Math.min(1, intensity);
   ctx.fillStyle = tintColor;
   ctx.fillRect(0, 0, w, h);
 
@@ -586,7 +586,7 @@ function applyBlendOverlay(
   ctx.drawImage(source, 0, 0);
 
   ctx.globalCompositeOperation = getCompositeOperation(mode);
-  ctx.globalAlpha = Math.min(1, opacity / 100);
+  ctx.globalAlpha = Math.min(1, opacity);
   ctx.drawImage(img, 0, 0, w, h);
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;

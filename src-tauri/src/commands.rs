@@ -7,6 +7,13 @@ use image::GenericImageView;
 use serde::Serialize;
 use tauri::Manager;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Windows: CREATE_NO_WINDOW flag prevents console windows from flashing.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 use crate::settings;
 
 // ---------------------------------------------------------------------------
@@ -214,11 +221,13 @@ fn find_ffmpeg(hint: &str) -> Result<String, String> {
     }
 
     // 5. Try "ffmpeg" from PATH - test by running it
-    match std::process::Command::new("ffmpeg")
-        .arg("-version")
+    let mut cmd = std::process::Command::new("ffmpeg");
+    cmd.arg("-version")
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    match cmd.output()
     {
         Ok(output) if output.status.success() => return Ok("ffmpeg".to_string()),
         _ => {}
@@ -229,11 +238,13 @@ fn find_ffmpeg(hint: &str) -> Result<String, String> {
 
 /// Get video duration in seconds by parsing FFmpeg stderr output.
 fn get_video_duration(ffmpeg_path: &str, video_path: &str) -> Result<f64, String> {
-    let output = std::process::Command::new(ffmpeg_path)
-        .args(["-i", video_path])
+    let mut cmd = std::process::Command::new(ffmpeg_path);
+    cmd.args(["-i", video_path])
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let output = cmd.output()
         .map_err(|e| format!("Failed to run FFmpeg at '{}': {}", ffmpeg_path, e))?;
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -337,8 +348,8 @@ pub async fn extract_video_frames(
         let output_str = output_path.to_string_lossy().to_string();
 
         // Run FFmpeg: -ss TIMESTAMP -i INPUT -vframes 1 -q:v 2 -y OUTPUT
-        let result = std::process::Command::new(&resolved_ffmpeg)
-            .args([
+        let mut cmd = std::process::Command::new(&resolved_ffmpeg);
+        cmd.args([
                 "-ss",
                 &ts_str,
                 "-i",
@@ -351,8 +362,10 @@ pub async fn extract_video_frames(
                 &output_str,
             ])
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output();
+            .stderr(std::process::Stdio::piped());
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let result = cmd.output();
 
         if let Ok(_output) = result {
             if output_path.exists() {

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as RadioGroup from '@radix-ui/react-radio-group';
 import * as Checkbox from '@radix-ui/react-checkbox';
@@ -27,6 +27,7 @@ import { ForegroundPanel } from './ForegroundPanel';
 import { BackgroundPanel } from './BackgroundPanel';
 import { useDocumentStore } from '../../stores/documentStore';
 import { useUiStore } from '../../stores/uiStore';
+import { useDraggable } from '../../hooks/useDraggable';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,6 +67,10 @@ export function ImageStudioWindow({
   onOpenChange,
   imageUrl,
 }: ImageStudioWindowProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const handleRef = useRef<HTMLDivElement>(null);
+  useDraggable(handleRef, containerRef, open);
+
   // State
   const [viewMode, setViewMode] = useState<ViewMode>('combined');
   const [separated, setSeparated] = useState(false);
@@ -163,6 +168,7 @@ export function ImageStudioWindow({
           data-testid="image-studio-overlay"
         />
         <Dialog.Content
+          ref={containerRef}
           data-testid="image-studio-window"
           className="fixed inset-0 z-50 flex flex-col outline-none"
           style={{
@@ -175,11 +181,13 @@ export function ImageStudioWindow({
              Header bar
              ============================================================ */}
           <div
+            ref={handleRef}
             className="flex items-center justify-between border-b px-4"
             style={{
               height: 44,
               borderColor: 'var(--border-color)',
               backgroundColor: 'var(--panel-bg)',
+              cursor: 'grab',
             }}
           >
             {/* Left: Save to Gallery */}

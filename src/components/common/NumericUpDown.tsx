@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 import { Icon } from './Icon';
 import { mdiChevronUp, mdiChevronDown } from '@mdi/js';
 
@@ -25,6 +25,7 @@ export interface NumericUpDownProps {
 
 /**
  * Reusable numeric input with small up/down arrow buttons on the right side.
+ * Press-and-hold on arrows: starts at 300ms interval, accelerates to 50ms.
  */
 export function NumericUpDown({
   value,
@@ -42,15 +43,55 @@ export function NumericUpDown({
     [min, max],
   );
 
-  const handleIncrement = useCallback(() => {
-    if (disabled) return;
-    onChange?.(clamp(value + step));
-  }, [value, step, clamp, onChange, disabled]);
+  // Keep latest props in refs so repeat timer reads fresh values
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  const stepRef = useRef(step);
+  const clampRef = useRef(clamp);
+  valueRef.current = value;
+  onChangeRef.current = onChange;
+  stepRef.current = step;
+  clampRef.current = clamp;
 
-  const handleDecrement = useCallback(() => {
-    if (disabled) return;
-    onChange?.(clamp(value - step));
-  }, [value, step, clamp, onChange, disabled]);
+  const repeatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const repeatStartRef = useRef(0);
+
+  const stopRepeat = useCallback(() => {
+    if (repeatTimerRef.current !== null) {
+      clearTimeout(repeatTimerRef.current);
+      repeatTimerRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => stopRepeat, [stopRepeat]);
+
+  const startRepeat = useCallback(
+    (direction: 1 | -1) => {
+      if (disabled) return;
+      stopRepeat();
+
+      // Fire immediately on first press
+      onChangeRef.current?.(clampRef.current(valueRef.current + stepRef.current * direction));
+      repeatStartRef.current = Date.now();
+
+      const tick = () => {
+        const elapsed = Date.now() - repeatStartRef.current;
+        // Accelerate: 300ms → 50ms over ~1s
+        const delay = Math.max(50, 300 - (elapsed / 1000) * 250);
+        repeatTimerRef.current = setTimeout(() => {
+          onChangeRef.current?.(
+            clampRef.current(valueRef.current + stepRef.current * direction),
+          );
+          tick();
+        }, delay);
+      };
+
+      // Initial delay before continuous repeat begins
+      repeatTimerRef.current = setTimeout(tick, 400);
+    },
+    [disabled, stopRepeat],
+  );
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,7 +153,9 @@ export function NumericUpDown({
           <button
             type="button"
             data-testid={`${testId}-up`}
-            onClick={handleIncrement}
+            onMouseDown={() => startRepeat(1)}
+            onMouseUp={stopRepeat}
+            onMouseLeave={stopRepeat}
             disabled={disabled}
             className="flex flex-1 cursor-pointer items-center justify-center border-none bg-transparent p-0 outline-none hover:bg-[var(--hover-bg)]"
             tabIndex={-1}
@@ -122,7 +165,9 @@ export function NumericUpDown({
           <button
             type="button"
             data-testid={`${testId}-down`}
-            onClick={handleDecrement}
+            onMouseDown={() => startRepeat(-1)}
+            onMouseUp={stopRepeat}
+            onMouseLeave={stopRepeat}
             disabled={disabled}
             className="flex flex-1 cursor-pointer items-center justify-center border-none bg-transparent p-0 outline-none hover:bg-[var(--hover-bg)]"
             tabIndex={-1}

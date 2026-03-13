@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as Select from '@radix-ui/react-select';
 import * as Switch from '@radix-ui/react-switch';
@@ -25,6 +25,7 @@ import { addShape } from '../../commands/layerCommands';
 import { useDocumentStore } from '../../stores/documentStore';
 import { SHAPE_TYPES } from '../../types/enums';
 import type { ShapeType } from '../../types/enums';
+import { useDraggable } from '../../hooks/useDraggable';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -72,6 +73,10 @@ interface ShapeLayer {
 // ---------------------------------------------------------------------------
 
 export function ShapeDrawingWindow({ open, onOpenChange, onSendToCanvas }: ShapeDrawingWindowProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const handleRef = useRef<HTMLDivElement>(null);
+  useDraggable(handleRef, containerRef, open);
+
   const [activeTool, setActiveTool] = useState<ToolId>('select');
   const [fillColor, _setFillColor] = useState('#FF6600');
   const [strokeColor, _setStrokeColor] = useState('#FFFFFF');
@@ -150,6 +155,7 @@ export function ShapeDrawingWindow({ open, onOpenChange, onSendToCanvas }: Shape
           style={{ backgroundColor: 'transparent' }}
         />
         <Dialog.Content
+          ref={containerRef}
           data-testid="shape-drawing-dialog"
           className="fixed inset-4 z-50 flex flex-col overflow-hidden rounded-lg border shadow-xl outline-none"
           style={{
@@ -161,10 +167,11 @@ export function ShapeDrawingWindow({ open, onOpenChange, onSendToCanvas }: Shape
           }}
           aria-describedby={undefined}
         >
-          {/* ---- Title bar ---- */}
+          {/* ---- Title bar (drag handle) ---- */}
           <div
+            ref={handleRef}
             className="flex shrink-0 items-center justify-between border-b px-3"
-            style={{ height: 36, backgroundColor: 'var(--toolbar-bg)', borderColor: 'var(--border-color)' }}
+            style={{ height: 36, backgroundColor: 'var(--toolbar-bg)', borderColor: 'var(--border-color)', cursor: 'grab' }}
           >
             <Dialog.Title className="select-none text-sm font-bold" style={{ color: 'var(--accent-orange)', fontSize: 14 }}>
               Shape Drawing

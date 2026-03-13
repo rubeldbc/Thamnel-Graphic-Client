@@ -1,7 +1,8 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Icon } from '../common/Icon';
 import { mdiClose } from '@mdi/js';
+import { useDraggable } from '../../hooks/useDraggable';
 
 export interface DialogBaseProps {
   /** Whether the dialog is open. */
@@ -40,6 +41,9 @@ export function DialogBase({
   footer,
 }: DialogBaseProps) {
   const testId = `${title.toLowerCase().replace(/\s+/g, '-')}-dialog`;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const handleRef = useRef<HTMLDivElement>(null);
+  useDraggable(handleRef, containerRef, open);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -50,6 +54,7 @@ export function DialogBase({
           data-testid={`${testId}-overlay`}
         />
         <Dialog.Content
+          ref={containerRef}
           data-testid={testId}
           className="fixed left-1/2 top-1/2 z-50 flex -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border shadow-xl outline-none"
           style={{
@@ -64,13 +69,15 @@ export function DialogBase({
           }}
           aria-describedby={undefined}
         >
-          {/* ---- Title bar ---- */}
+          {/* ---- Title bar (drag handle) ---- */}
           <div
+            ref={handleRef}
             className="flex shrink-0 items-center justify-between border-b px-3"
             style={{
               height: 36,
               backgroundColor: 'var(--toolbar-bg)',
               borderColor: 'var(--border-color)',
+              cursor: 'grab',
             }}
             data-testid={`${testId}-titlebar`}
           >

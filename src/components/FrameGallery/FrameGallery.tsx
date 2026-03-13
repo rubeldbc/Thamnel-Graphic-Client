@@ -128,6 +128,7 @@ export function FrameGallery({
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [isHoveringScroll, setIsHoveringScroll] = useState(false);
   const [thumbHeight, setThumbHeight] = useState(68);
+  const [animatingFrameIds, setAnimatingFrameIds] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const galleryRef = useRef<HTMLDivElement>(null);
 
@@ -199,7 +200,24 @@ export function FrameGallery({
         timestamp: f.timestamp,
       }));
 
-      addFrames(frameEntries);
+      // Add frames one-by-one with fade-in animation
+      const addFrame = useMediaStore.getState().addFrame;
+      for (let i = 0; i < frameEntries.length; i++) {
+        const entry = frameEntries[i];
+        addFrame(entry);
+        setAnimatingFrameIds((prev) => new Set(prev).add(entry.id));
+        // Scroll to reveal the newly added frame
+        if (scrollRef.current) {
+          scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+        }
+        // Small delay between frames for visual effect
+        if (i < frameEntries.length - 1) {
+          await new Promise((r) => setTimeout(r, 120));
+        }
+      }
+      // Clear animation flags after all animations complete
+      setTimeout(() => setAnimatingFrameIds(new Set()), 400);
+
       setVideoExtracted(videoId, true);
 
       // Brief delay to show 100% before hiding
@@ -480,6 +498,7 @@ export function FrameGallery({
                       timestamp={frame.timestamp}
                       isSelected={frame.id === selectedFrameId}
                       thumbHeight={thumbHeight}
+                      animate={animatingFrameIds.has(frame.id)}
                       onClick={() => handleFrameClick(frame.id, frame.src)}
                       onDoubleClick={() => handleFrameClick(frame.id, frame.src)}
                     />
