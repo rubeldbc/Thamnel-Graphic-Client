@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import { useRef, useEffect, useLayoutEffect, useCallback, useState, useMemo } from 'react';
 import { Ruler, RulerCorner } from './Ruler';
 import { GridOverlay } from './GridOverlay';
 import { MarkerGuideOverlay } from './MarkerGuideOverlay';
@@ -702,10 +702,34 @@ export function CanvasViewport({
     enabled: true,
   });
 
-  // CPU compositor: fallback only when GPU renderer is not active.
-  // When GPU is active, it handles all rendering via Rust wgpu+Vello.
+  // During interactive drags (move/resize/rotate), bypass the GPU renderer
+  // and fall back to the CPU compositor. The GPU IPC roundtrip is ~60ms per
+  // frame which causes visible lag between the selection handles and the
+  // rendered image. The CPU compositor runs synchronously inside
+  // useLayoutEffect so it paints in the same frame as the handle overlay.
+  const isInteracting =
+    interaction.dragMode != null &&
+    interaction.dragMode !== 'none' &&
+    interaction.dragMode !== 'marqueeSelect' &&
+    interaction.dragMode !== 'drawShape';
+
+  const effectiveGpuActive = gpuActive && !isInteracting;
+
+  // Suppress GPU render dispatches while the CPU compositor is handling
+  // interactive rendering — avoids wasting IPC bandwidth during drags.
   useEffect(() => {
-    if (gpuActive) return; // GPU handles rendering — skip CPU fallback
+    if (gpuActive && isInteracting) {
+      useDocumentStore.getState().setSuppressRender(true);
+      return () => { useDocumentStore.getState().setSuppressRender(false); };
+    }
+  }, [gpuActive, isInteracting]);
+
+  // CPU compositor: fallback when GPU renderer is not active or during
+  // interactive drag operations for instant visual feedback.
+  // useLayoutEffect ensures the canvas updates in the same paint frame as
+  // the HandleOverlay, so the image moves in sync with the selection box.
+  useLayoutEffect(() => {
+    if (effectiveGpuActive) return; // GPU handles rendering — skip CPU fallback
 
     const displayCanvas = renderCanvasRef.current;
     if (!displayCanvas) return;
@@ -730,7 +754,7 @@ export function CanvasViewport({
     }
 
     console.debug(`[CPU] composite: ${(performance.now() - t0).toFixed(1)}ms`);
-  }, [layers, canvasWidth, canvasHeight, backgroundColor, gpuActive]);
+  }, [layers, canvasWidth, canvasHeight, backgroundColor, effectiveGpuActive]);
 
   // ---------------------------------------------------------------------------
   // Derived layout values

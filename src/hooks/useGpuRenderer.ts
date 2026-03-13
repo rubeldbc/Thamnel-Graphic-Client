@@ -24,7 +24,7 @@ export interface UseGpuRendererResult {
 }
 
 /** Minimum interval between GPU render dispatches (ms). */
-const GPU_RENDER_INTERVAL_MS = 100;
+const GPU_RENDER_INTERVAL_MS = 16;
 
 /**
  * Drives the live viewport render loop via the Rust GPU pipeline (wgpu + Vello).
