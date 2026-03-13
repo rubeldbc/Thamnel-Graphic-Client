@@ -266,6 +266,59 @@ export function CanvasViewport({
   );
 
   // ---------------------------------------------------------------------------
+  // Polyline drawn callback: creates a polyline shape layer from click-placed points
+  // ---------------------------------------------------------------------------
+  const handlePolylineDrawn = useCallback(
+    (points: Array<{ x: number; y: number }>) => {
+      if (points.length < 2) return;
+      storePushUndo();
+
+      // Compute bounding box of all points
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of points) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+
+      // Ensure minimum dimensions
+      const bw = Math.max(maxX - minX, 2);
+      const bh = Math.max(maxY - minY, 2);
+
+      // Convert points to local coordinates (relative to layer top-left)
+      const localPoints = points.map((p) => ({
+        x: p.x - minX,
+        y: p.y - minY,
+      }));
+
+      const props = createDefaultShapeProperties();
+      props.shapeType = 'line';
+      props.fillColor = 'transparent';
+      props.borderColor = drawStrokeColor;
+      props.borderWidth = Math.max(props.borderWidth, 2);
+      props.points = localPoints;
+
+      const layers = useDocumentStore.getState().project.layers;
+      const shapeName = getUniqueLayerName('Line', layers);
+
+      const layer = createDefaultLayer({
+        type: 'shape',
+        name: shapeName,
+        x: minX,
+        y: minY,
+        width: bw,
+        height: bh,
+        shapeProperties: props,
+      });
+      storeAddLayer(layer);
+      storeSelectLayer(layer.id);
+      setActiveTool('select');
+    },
+    [drawStrokeColor, storePushUndo, storeAddLayer, storeSelectLayer, setActiveTool],
+  );
+
+  // ---------------------------------------------------------------------------
   // Ctrl+drag duplicate callback: clones the layer and adds it to the store
   // ---------------------------------------------------------------------------
   const handleDuplicateLayer = useCallback(
@@ -304,6 +357,7 @@ export function CanvasViewport({
     zoom,
     activeTool: activeToolId,
     onShapeDrawn: handleShapeDrawn,
+    onPolylineDrawn: handlePolylineDrawn,
     onDuplicateLayer: handleDuplicateLayer,
   });
 
@@ -851,7 +905,8 @@ export function CanvasViewport({
                 rect={effectiveMarqueeRect}
                 zoom={zoom}
                 isDrawing={interaction.dragMode === 'drawShape'}
-                dragStartState={interaction.dragStartState}
+                polylinePoints={interaction.polylinePoints}
+                polylinePreviewPoint={interaction.polylinePreviewPoint}
               />
 
               {/* Layer 8: HandleOverlay */}

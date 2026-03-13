@@ -129,6 +129,10 @@ export interface CanvasInteractionResult {
   marqueeRect: { x: number; y: number; width: number; height: number } | null;
   /** Drag start state for external consumption. */
   dragStartState: DragStartState | null;
+  /** Polyline points being drawn (click-to-place mode for lines). */
+  polylinePoints: Array<{ x: number; y: number }>;
+  /** Current cursor position during polyline drawing (for preview segment). */
+  polylinePreviewPoint: { x: number; y: number } | null;
 }
 
 /**
@@ -444,6 +448,8 @@ export interface UseCanvasInteractionOptions {
   activeTool?: ActiveTool;
   /** Callback when a shape is drawn via marquee (drawShape mode). Rect in canvas coords. */
   onShapeDrawn?: (rect: { x: number; y: number; width: number; height: number }, startPt?: { x: number; y: number }, endPt?: { x: number; y: number }) => void;
+  /** Callback when a polyline is finished (click-to-place line drawing). */
+  onPolylineDrawn?: (points: Array<{ x: number; y: number }>) => void;
   /** Callback to duplicate a layer. Returns the new cloned layer. */
   onDuplicateLayer?: (layer: LayerModel) => LayerModel | null;
 }
@@ -475,6 +481,7 @@ export function useCanvasInteraction(
     zoom: externalZoom,
     activeTool,
     onShapeDrawn,
+    onPolylineDrawn,
     onDuplicateLayer,
   } = options;
 
@@ -495,6 +502,9 @@ export function useCanvasInteraction(
   const dragStartRef = useRef<DragStartState | null>(null);
   // Store the raw end point for line drawing (before normalization)
   const lineEndRef = useRef<{ x: number; y: number } | null>(null);
+  // Polyline drawing state (click-to-place line mode)
+  const [polylinePoints, setPolylinePoints] = useState<Array<{ x: number; y: number }>>([]);
+  const [polylinePreviewPoint, setPolylinePreviewPoint] = useState<{ x: number; y: number } | null>(null);
 
   const updateModifiers = useCallback((e: React.MouseEvent | React.WheelEvent) => {
     setModifiers({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey });
@@ -579,17 +589,55 @@ export function useCanvasInteraction(
         return;
       }
 
+      // Right-click finishes polyline drawing
+      if (e.button === 2 && polylinePoints.length >= 2) {
+        e.preventDefault();
+        onPolylineDrawn?.(polylinePoints);
+        setPolylinePoints([]);
+        setPolylinePreviewPoint(null);
+        setDragMode('none');
+        setInteractionMode('idle');
+        setCursor('default');
+        return;
+      }
+
       if (e.button !== 0) return;
 
       // Priority 0: Shape tool or Text tool — enter draw mode immediately
       if (activeTool === 'shape' || activeTool === 'text') {
-        const drawMode: DragMode = activeTool === 'shape' ? 'drawShape' : 'drawText';
+        const currentShapeType = useUiStore.getState().selectedShapeType;
+
+        // Polyline mode: line tool uses click-to-place points
+        if (activeTool === 'shape' && currentShapeType === 'line') {
+          // Snap point with Shift (45° relative to last point)
+          let px = canvasPos.x;
+          let py = canvasPos.y;
+          if (e.shiftKey && polylinePoints.length > 0) {
+            const last = polylinePoints[polylinePoints.length - 1];
+            const dx = px - last.x;
+            const dy = py - last.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const rawAngle = Math.atan2(dy, dx);
+            const snapped = Math.round(rawAngle / (Math.PI / 4)) * (Math.PI / 4);
+            px = last.x + dist * Math.cos(snapped);
+            py = last.y + dist * Math.sin(snapped);
+          }
+
+          setPolylinePoints((prev) => [...prev, { x: px, y: py }]);
+          setPolylinePreviewPoint({ x: px, y: py });
+          setDragMode('drawPolyline');
+          setInteractionMode('draw');
+          setCursor('crosshair');
+          return;
+        }
+
+        const drawMode: DragMode = 'drawShape';
         const startState = buildDragStart(
-          canvasPos, e.clientX, e.clientY, drawMode, null, [],
+          canvasPos, e.clientX, e.clientY, activeTool === 'text' ? 'drawText' : drawMode, null, [],
         );
         dragStartRef.current = startState;
         setDragStartState(startState);
-        setDragMode(drawMode);
+        setDragMode(activeTool === 'text' ? 'drawText' : drawMode);
         setInteractionMode('draw');
         setCursor('crosshair');
         setIsDragging(true);
@@ -807,6 +855,9 @@ export function useCanvasInteraction(
       selectedLayerIds,
       activeTool,
       onDuplicateLayer,
+      polylinePoints,
+      onPolylineDrawn,
+      dragMode,
     ],
   );
 
@@ -817,6 +868,26 @@ export function useCanvasInteraction(
     (e: React.MouseEvent) => {
       updateModifiers(e);
       const canvasPos = getCanvasCoords(e);
+
+      // Polyline preview: update cursor position when in polyline drawing mode
+      if (polylinePoints.length > 0 && dragMode === 'drawPolyline') {
+        let px = canvasPos.x;
+        let py = canvasPos.y;
+        // Shift: snap to 45° relative to last point
+        if (e.shiftKey) {
+          const last = polylinePoints[polylinePoints.length - 1];
+          const dx = px - last.x;
+          const dy = py - last.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const rawAngle = Math.atan2(dy, dx);
+          const snapped = Math.round(rawAngle / (Math.PI / 4)) * (Math.PI / 4);
+          px = last.x + dist * Math.cos(snapped);
+          py = last.y + dist * Math.sin(snapped);
+        }
+        setPolylinePreviewPoint({ x: px, y: py });
+        setCursor('crosshair');
+        return;
+      }
 
       // Not dragging — update hover cursor based on handle proximity
       if (!isDragging || !dragStartRef.current) {
@@ -1089,6 +1160,8 @@ export function useCanvasInteraction(
       gridVisible,
       gridSpacing,
       activeTool,
+      polylinePoints,
+      dragMode,
     ],
   );
 
@@ -1128,18 +1201,23 @@ export function useCanvasInteraction(
       // Clear smart guides
       smartGuides?.clearGuides();
 
+      // Preserve polyline drawing mode across individual clicks
+      const inPolyline = polylinePoints.length > 0;
+
       setIsDragging(false);
       dragStartRef.current = null;
       lineEndRef.current = null;
       setDragStartState(null);
       setDragDelta({ x: 0, y: 0 });
-      setDragMode('none');
       setActiveHandle(null);
       setMarqueeRect(null);
-      setInteractionMode('idle');
-      setCursor('default');
+      if (!inPolyline) {
+        setDragMode('none');
+        setInteractionMode('idle');
+        setCursor('default');
+      }
     },
-    [updateModifiers, marqueeRect, selectByMarquee, smartGuides, onShapeDrawn],
+    [updateModifiers, marqueeRect, selectByMarquee, smartGuides, onShapeDrawn, polylinePoints],
   );
 
   // -------------------------------------------------------------------------
@@ -1193,6 +1271,42 @@ export function useCanvasInteraction(
     [updateModifiers],
   );
 
+  // Cancel polyline on Escape key
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && polylinePoints.length > 0) {
+        setPolylinePoints([]);
+        setPolylinePreviewPoint(null);
+        setDragMode('none');
+        setInteractionMode('idle');
+        setCursor('default');
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [polylinePoints.length]);
+
+  // Reset polyline when tool changes away from line drawing
+  useEffect(() => {
+    if (polylinePoints.length > 0) {
+      const shapeType = useUiStore.getState().selectedShapeType;
+      if (activeTool !== 'shape' || shapeType !== 'line') {
+        setPolylinePoints([]);
+        setPolylinePreviewPoint(null);
+        setDragMode('none');
+        setInteractionMode('idle');
+      }
+    }
+  }, [activeTool, polylinePoints.length]);
+
+  // Prevent context menu during polyline drawing
+  useEffect(() => {
+    if (polylinePoints.length === 0) return;
+    const preventCtx = (e: Event) => { e.preventDefault(); };
+    window.addEventListener('contextmenu', preventCtx);
+    return () => window.removeEventListener('contextmenu', preventCtx);
+  }, [polylinePoints.length]);
+
   // Clean up drag state if mouse leaves window
   useEffect(() => {
     const handleGlobalUp = () => {
@@ -1233,5 +1347,7 @@ export function useCanvasInteraction(
     activeHandle,
     marqueeRect,
     dragStartState,
+    polylinePoints,
+    polylinePreviewPoint,
   };
 }

@@ -350,6 +350,7 @@ export function useSelectionManager(): SelectionManagerResult {
                 layer.shapeProperties.shapeType,
                 layer.shapeProperties.polygonSides,
                 layer.shapeProperties.starInnerRatio,
+                layer.shapeProperties.points,
               )
             ) {
               continue; // Click was in bounding box but outside actual shape
@@ -406,7 +407,7 @@ export function useSelectionManager(): SelectionManagerResult {
               !pointInShapePath(
                 localX, localY, layer.width, layer.height,
                 layer.shapeProperties.shapeType, layer.shapeProperties.polygonSides,
-                layer.shapeProperties.starInnerRatio,
+                layer.shapeProperties.starInnerRatio, layer.shapeProperties.points,
               )
             ) {
               continue;

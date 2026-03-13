@@ -56,6 +56,7 @@ export function renderShapePath(
   height: number,
   polygonSides?: number,
   starInnerRatio?: number,
+  points?: Array<{ x: number; y: number }>,
 ): void {
   const w = width;
   const h = height;
@@ -67,8 +68,17 @@ export function renderShapePath(
   switch (shapeType) {
     // ---- Lines -----------------------------------------------------------
     case 'line':
-      ctx.moveTo(0, cy);
-      ctx.lineTo(w, cy);
+      if (points && points.length >= 2) {
+        // Polyline: draw connected line segments from points array
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
+      } else {
+        // Legacy/fallback: horizontal line
+        ctx.moveTo(0, cy);
+        ctx.lineTo(w, cy);
+      }
       break;
 
     case 'diagonalLine':
@@ -412,7 +422,7 @@ export function fillShape(
   const prevAlpha = ctx.globalAlpha;
 
   // Draw the path
-  renderShapePath(ctx, shapeProps.shapeType, width, height, shapeProps.polygonSides, shapeProps.starInnerRatio);
+  renderShapePath(ctx, shapeProps.shapeType, width, height, shapeProps.polygonSides, shapeProps.starInnerRatio, shapeProps.points);
 
   // Fill
   if (shapeProps.fill) {
@@ -580,12 +590,13 @@ export function pointInShapePath(
   shapeType: ShapeType,
   polygonSides?: number,
   starInnerRatio?: number,
+  points?: Array<{ x: number; y: number }>,
 ): boolean {
   const ctx = getHitCtx();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 
   // Build the path at origin
-  renderShapePath(ctx, shapeType, width, height, polygonSides, starInnerRatio);
+  renderShapePath(ctx, shapeType, width, height, polygonSides, starInnerRatio, points);
 
   // For line shapes use stroke proximity
   if (shapeType === 'line' || shapeType === 'diagonalLine') {

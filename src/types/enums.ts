@@ -195,6 +195,7 @@ export type DragMode =
   | 'marqueeSelect'
   | 'drawShape'
   | 'drawText'
+  | 'drawPolyline'
   | 'anchorMove';
 
 // ---------------------------------------------------------------------------
@@ -216,6 +217,7 @@ export const DRAG_MODES: DragMode[] = [
   'marqueeSelect',
   'drawShape',
   'drawText',
+  'drawPolyline',
   'anchorMove',
 ];
 
