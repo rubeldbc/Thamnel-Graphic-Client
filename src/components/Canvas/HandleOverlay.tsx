@@ -125,11 +125,20 @@ export function HandleOverlay({
   const anchorX = selectedBounds.anchorX ?? 0.5;
   const anchorY = selectedBounds.anchorY ?? 0.5;
 
+  // Expand bounds outward by half the stroke width so the selection box
+  // wraps fully around the visible stroke, not through it.
+  const strokePad = useMemo(() => {
+    if (selectedLayers.length !== 1) return 0;
+    const sp = selectedLayers[0]?.shapeProperties;
+    if (!sp || sp.borderWidth <= 0) return 0;
+    return Math.ceil(sp.borderWidth / 2);
+  }, [selectedLayers]);
+
   // Scaled coordinates for positioning in CSS
-  const sx = x * zoom;
-  const sy = y * zoom;
-  const sw = width * zoom;
-  const sh = height * zoom;
+  const sx = (x - strokePad) * zoom;
+  const sy = (y - strokePad) * zoom;
+  const sw = (width + strokePad * 2) * zoom;
+  const sh = (height + strokePad * 2) * zoom;
 
   // Zoom-compensated handle size — stays constant on screen
   const hs = BASE_HANDLE_SIZE * (1 / zoom) * zoom; // = BASE_HANDLE_SIZE (in screen px)

@@ -14,6 +14,8 @@ export interface UiState {
   drawStrokeColor: string;
   /** Live polygon sides count during shape drawing (adjusted by up/down arrow). */
   drawPolygonSides: number;
+  /** Star inner radius ratio (0-1, default 0.5 = spikeLow/spikeHigh). */
+  starInnerRatio: number;
   zoom: number;
   gridVisible: boolean;
   isEditingText: boolean;
@@ -32,6 +34,7 @@ export interface UiActions {
   setDrawFillColor: (color: string) => void;
   setDrawStrokeColor: (color: string) => void;
   setDrawPolygonSides: (sides: number) => void;
+  setStarInnerRatio: (ratio: number) => void;
   setZoom: (zoom: number) => void;
   toggleGrid: () => void;
   setEditingText: (editing: boolean) => void;
@@ -53,6 +56,7 @@ export const useUiStore = create<UiStore>((set) => ({
   drawFillColor: '#3b82f6',
   drawStrokeColor: '#000000',
   drawPolygonSides: 4,
+  starInnerRatio: 0.5,
   zoom: 1,
   gridVisible: false,
   isEditingText: false,
@@ -73,6 +77,8 @@ export const useUiStore = create<UiStore>((set) => ({
   setDrawStrokeColor: (color) => set({ drawStrokeColor: color }),
 
   setDrawPolygonSides: (sides) => set({ drawPolygonSides: Math.max(3, sides) }),
+
+  setStarInnerRatio: (ratio) => set({ starInnerRatio: Math.max(0.05, Math.min(0.95, ratio)) }),
 
   setZoom: (zoom) => set({ zoom: Math.max(0.1, Math.min(zoom, 32)) }),
 

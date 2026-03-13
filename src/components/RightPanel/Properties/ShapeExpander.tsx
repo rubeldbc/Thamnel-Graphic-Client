@@ -77,15 +77,16 @@ export function ShapeExpander({
             <ColorSwatch color={sp.fillColor} size={20} label="fill" />
           </div>
 
-          {/* Border colour + width + slider */}
+          {/* Stroke colour + width + slider */}
           <div className="flex items-center gap-2">
-            <span className="select-none" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Border</span>
-            <ColorSwatch color={sp.borderColor} size={20} label="border" />
+            <span className="select-none" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Stroke</span>
+            <ColorSwatch color={sp.borderColor} size={20} label="stroke" />
             <NumericUpDown
               value={sp.borderWidth}
               onChange={(v) => updateShape({ borderWidth: v })}
               min={0}
               max={50}
+              step={0.1}
               width={50}
               suffix="px"
             />
@@ -94,7 +95,7 @@ export function ShapeExpander({
               value={[sp.borderWidth]}
               min={0}
               max={50}
-              step={1}
+              step={0.1}
               onValueChange={([v]) => updateShape({ borderWidth: v })}
             >
               <Slider.Track className="relative h-[3px] flex-1 rounded-full" style={{ backgroundColor: 'var(--border-color)' }}>

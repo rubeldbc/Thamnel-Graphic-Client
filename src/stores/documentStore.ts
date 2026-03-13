@@ -90,7 +90,9 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       project: {
         ...state.project,
         layers: state.project.layers.map((l) =>
-          l.id === layerId ? { ...l, ...changes } : l,
+          l.id === layerId
+            ? { ...l, ...changes, renderVersion: (l.renderVersion ?? 0) + 1 }
+            : l,
         ),
       },
     })),

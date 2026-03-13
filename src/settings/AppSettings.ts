@@ -295,6 +295,17 @@ export interface AccessibilitySettings {
   keyboardNavigationHighlight: boolean;
 }
 
+export interface ShapeToolSettings {
+  /** Last used shape type (rectangle, ellipse, star, line). */
+  lastShapeType: string;
+  /** Star outer spike distance from center (pixels, reference). */
+  starSpikeHigh: number;
+  /** Star inner valley distance from center (pixels, reference). */
+  starSpikeLow: number;
+  /** Number of star spikes. */
+  starSpikeCount: number;
+}
+
 export interface RecentFilesSettings {
   maxRecentFiles: number;
   maxExportListCount: number;
@@ -341,6 +352,7 @@ export interface AppSettings {
   groupColors: GroupColorsSettings;
   performance: PerformanceSettings;
   accessibility: AccessibilitySettings;
+  shapeTool: ShapeToolSettings;
   recentFiles: RecentFilesSettings;
   customCanvasPresets: CustomCanvasPreset[];
 }
@@ -632,6 +644,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
     cursorScale: 1,
     screenReaderAnnouncements: false,
     keyboardNavigationHighlight: true,
+  },
+
+  shapeTool: {
+    lastShapeType: 'rectangle',
+    starSpikeHigh: 50,
+    starSpikeLow: 25,
+    starSpikeCount: 5,
   },
 
   recentFiles: {

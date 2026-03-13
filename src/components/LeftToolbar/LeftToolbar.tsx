@@ -1,4 +1,4 @@
-import { useCallback, type MouseEvent } from 'react';
+import { useCallback, useState, useRef, useEffect, type MouseEvent } from 'react';
 import {
   mdiCursorDefault,
   mdiFormatText,
@@ -15,12 +15,13 @@ import {
   mdiRotateRight,
 } from '@mdi/js';
 import { ToolToggleButton } from './ToolToggleButton';
-import { ShapePickerPopup } from './ShapePickerPopup';
+import { ShapeQuickPicker, getShapeIcon } from './ShapeQuickPicker';
 import { AlignPopup } from './AlignPopup';
 import { DistributePopup } from './DistributePopup';
 import { FillStrokeSwatches } from './FillStrokeSwatches';
 import { useUiStore } from '../../stores/uiStore';
 import { useDocumentStore } from '../../stores/documentStore';
+import { useSettingsStore } from '../../settings/settingsStore';
 import { getCommand } from '../../commands/useCommand';
 import type { ActiveTool } from '../../types/index';
 
@@ -120,6 +121,16 @@ export function LeftToolbar() {
   // Read the active tool from uiStore (single source of truth)
   const activeTool = useUiStore((s) => s.activeTool);
 
+  // Last used shape type from settings (for shape button icon)
+  const lastShapeType = useSettingsStore(
+    (s) => (s.getSetting('shapeTool.lastShapeType') as string) ?? 'rectangle',
+  );
+
+  // Shape quick picker state
+  const [quickPickerOpen, setQuickPickerOpen] = useState(false);
+  const shapeButtonRef = useRef<HTMLDivElement>(null);
+  const [shapeButtonRect, setShapeButtonRect] = useState<DOMRect | null>(null);
+
   // Read fill/stroke colours from the currently selected layer (if any).
   const fillColor = useDocumentStore((s) => {
     if (s.selectedLayerIds.length === 0) return '#FFFFFF';
@@ -135,6 +146,14 @@ export function LeftToolbar() {
     return layer.shapeProperties?.borderColor ?? layer.textProperties?.strokeColor ?? '#000000';
   });
 
+  // Detect if the selected layer is a line shape (fill not applicable)
+  const isLineSelected = useDocumentStore((s) => {
+    if (s.selectedLayerIds.length === 0) return false;
+    const layer = s.project.layers.find((l) => l.id === s.selectedLayerIds[0]);
+    if (!layer || !layer.shapeProperties) return false;
+    return layer.shapeProperties.shapeType === 'line' || layer.shapeProperties.shapeType === 'diagonalLine';
+  });
+
   const handleToolClick = useCallback((name: ToolName) => {
     const activeToolValue = TOOL_TO_ACTIVE[name] ?? 'select';
     useUiStore.getState().setActiveTool(activeToolValue);
@@ -147,10 +166,45 @@ export function LeftToolbar() {
 
   const handleShapeSelect = useCallback((shapeId: string) => {
     // Enter shape draw mode: set the shape type and switch to shape tool.
-    // The actual shape will be created on canvas via marquee draw.
     const ui = useUiStore.getState();
     ui.setSelectedShapeType(shapeId as import('../../types/enums').ShapeType);
     ui.setActiveTool('shape');
+    // Save last used shape to settings
+    useSettingsStore.getState().setSetting('shapeTool.lastShapeType', shapeId);
+    // Load star settings if star selected
+    if (shapeId === 'star') {
+      const settings = useSettingsStore.getState();
+      const count = (settings.getSetting('shapeTool.starSpikeCount') as number) ?? 5;
+      const high = (settings.getSetting('shapeTool.starSpikeHigh') as number) ?? 50;
+      const low = (settings.getSetting('shapeTool.starSpikeLow') as number) ?? 25;
+      ui.setDrawPolygonSides(count);
+      ui.setStarInnerRatio(high > 0 ? low / high : 0.5);
+    }
+  }, []);
+
+  // Handle shape button right-click: show quick picker
+  const handleShapeRightClick = useCallback((e: MouseEvent) => {
+    e.preventDefault();
+    if (shapeButtonRef.current) {
+      setShapeButtonRect(shapeButtonRef.current.getBoundingClientRect());
+    }
+    setQuickPickerOpen(true);
+  }, []);
+
+  // Handle shape button left-click: use last used shape and enter draw mode
+  const handleShapeClick = useCallback(() => {
+    const last = (useSettingsStore.getState().getSetting('shapeTool.lastShapeType') as string) ?? 'rectangle';
+    handleShapeSelect(last);
+  }, [handleShapeSelect]);
+
+  // Load star settings on startup
+  useEffect(() => {
+    const settings = useSettingsStore.getState();
+    const count = (settings.getSetting('shapeTool.starSpikeCount') as number) ?? 5;
+    const high = (settings.getSetting('shapeTool.starSpikeHigh') as number) ?? 50;
+    const low = (settings.getSetting('shapeTool.starSpikeLow') as number) ?? 25;
+    useUiStore.getState().setDrawPolygonSides(count);
+    useUiStore.getState().setStarInnerRatio(high > 0 ? low / high : 0.5);
   }, []);
 
   const handleAlign = useCallback((alignId: string) => {
@@ -220,22 +274,19 @@ export function LeftToolbar() {
     >
       {/* ---- Drawing / Selection Tools ---- */}
       {TOOLS.map((tool) => {
-        // Shape tool gets wrapped in ShapePickerPopup
+        // Shape tool: left-click draws last shape, right-click opens quick picker
         if (tool.name === 'shape') {
           return (
-            <ShapePickerPopup
-              key={tool.name}
-              trigger={
-                <ToolToggleButton
-                  icon={tool.icon}
-                  toolName={tool.name}
-                  isActive={isToolActive(tool.name)}
-                  onClick={() => handleToolClick(tool.name)}
-                  tooltip={tool.tooltip}
-                />
-              }
-              onSelect={handleShapeSelect}
-            />
+            <div key={tool.name} ref={shapeButtonRef}>
+              <ToolToggleButton
+                icon={getShapeIcon(lastShapeType)}
+                toolName={tool.name}
+                isActive={isToolActive(tool.name)}
+                onClick={handleShapeClick}
+                onRightClick={handleShapeRightClick}
+                tooltip={`Shape (R) — Right-click for options`}
+              />
+            </div>
           );
         }
 
@@ -343,10 +394,19 @@ export function LeftToolbar() {
         <FillStrokeSwatches
           fillColor={fillColor}
           strokeColor={strokeColor}
-          onFillClick={handleFillClick}
+          onFillClick={isLineSelected ? undefined : handleFillClick}
           onStrokeClick={handleStrokeClick}
+          fillDisabled={isLineSelected}
         />
       </div>
+
+      {/* Shape Quick Picker (right-click popup) */}
+      <ShapeQuickPicker
+        open={quickPickerOpen}
+        anchorRect={shapeButtonRect}
+        onSelect={handleShapeSelect}
+        onClose={() => setQuickPickerOpen(false)}
+      />
     </div>
   );
 }

@@ -55,6 +55,7 @@ export function renderShapePath(
   width: number,
   height: number,
   polygonSides?: number,
+  starInnerRatio?: number,
 ): void {
   const w = width;
   const h = height;
@@ -200,9 +201,13 @@ export function renderShapePath(
       break;
     }
 
-    case 'star':
-      starPolygon(ctx, cx, cy, Math.min(cx, cy), Math.min(cx, cy) * 0.4, 5);
+    case 'star': {
+      const outerR = Math.min(cx, cy);
+      const ratio = starInnerRatio ?? 0.4;
+      const pts = polygonSides ?? 5;
+      starPolygon(ctx, cx, cy, outerR, outerR * ratio, pts);
       break;
+    }
 
     case 'star6':
       starPolygon(ctx, cx, cy, Math.min(cx, cy), Math.min(cx, cy) * 0.5, 6);
@@ -407,7 +412,7 @@ export function fillShape(
   const prevAlpha = ctx.globalAlpha;
 
   // Draw the path
-  renderShapePath(ctx, shapeProps.shapeType, width, height, shapeProps.polygonSides);
+  renderShapePath(ctx, shapeProps.shapeType, width, height, shapeProps.polygonSides, shapeProps.starInnerRatio);
 
   // Fill
   if (shapeProps.fill) {
@@ -452,6 +457,7 @@ export function getShapeTightBounds(
   width: number,
   height: number,
   polygonSides?: number,
+  starInnerRatio?: number,
 ): { x: number; y: number; width: number; height: number } {
   const w = width;
   const h = height;
@@ -518,8 +524,12 @@ export function getShapeTightBounds(
       const sides = Math.max(3, polygonSides ?? 4);
       return polyBounds(cx, cy, Math.min(cx, cy), sides);
     }
-    case 'star':
-      return starBounds(cx, cy, Math.min(cx, cy), Math.min(cx, cy) * 0.4, 5);
+    case 'star': {
+      const sr = Math.min(cx, cy);
+      const sRatio = starInnerRatio ?? 0.4;
+      const sPts = polygonSides ?? 5;
+      return starBounds(cx, cy, sr, sr * sRatio, sPts);
+    }
     case 'star6':
       return starBounds(cx, cy, Math.min(cx, cy), Math.min(cx, cy) * 0.5, 6);
     case 'ring': {
@@ -569,12 +579,13 @@ export function pointInShapePath(
   height: number,
   shapeType: ShapeType,
   polygonSides?: number,
+  starInnerRatio?: number,
 ): boolean {
   const ctx = getHitCtx();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 
   // Build the path at origin
-  renderShapePath(ctx, shapeType, width, height, polygonSides);
+  renderShapePath(ctx, shapeType, width, height, polygonSides, starInnerRatio);
 
   // For line shapes use stroke proximity
   if (shapeType === 'line' || shapeType === 'diagonalLine') {

@@ -174,16 +174,32 @@ export function CanvasViewport({
   // Shape drawn callback: creates shape layer at drawn rect, switches to select
   // ---------------------------------------------------------------------------
   const handleShapeDrawn = useCallback(
-    (rect: { x: number; y: number; width: number; height: number }) => {
+    (rect: { x: number; y: number; width: number; height: number }, startPt?: { x: number; y: number }, endPt?: { x: number; y: number }) => {
       storePushUndo();
-      const sides = useUiStore.getState().drawPolygonSides;
+      const uiState = useUiStore.getState();
+      const sides = uiState.drawPolygonSides;
       const isPolygon = selectedShapeType === 'rectangle' && sides !== 4;
+      const isStar = selectedShapeType === 'star';
+      const isLine = selectedShapeType === 'line';
 
       const props = createDefaultShapeProperties();
-      props.shapeType = isPolygon ? 'polygon' : (selectedShapeType as ShapeType);
-      props.polygonSides = sides;
-      props.fillColor = drawFillColor;
-      props.borderColor = drawStrokeColor;
+      if (isStar) {
+        props.shapeType = 'star';
+        props.polygonSides = sides;
+        props.starInnerRatio = uiState.starInnerRatio;
+      } else {
+        props.shapeType = isPolygon ? 'polygon' : (selectedShapeType as ShapeType);
+        props.polygonSides = sides;
+      }
+      // Line: stroke only, no fill
+      if (isLine) {
+        props.fillColor = 'transparent';
+        props.borderColor = drawStrokeColor;
+        props.borderWidth = Math.max(props.borderWidth, 2);
+      } else {
+        props.fillColor = drawFillColor;
+        props.borderColor = drawStrokeColor;
+      }
 
       // Auto-name by polygon sides
       const POLYGON_NAMES: Record<number, string> = {
@@ -191,25 +207,59 @@ export function CanvasViewport({
         7: 'Heptagon', 8: 'Octagon', 9: 'Nonagon', 10: 'Decagon',
         11: 'Hendecagon', 12: 'Dodecagon',
       };
-      const baseName = isPolygon
-        ? (POLYGON_NAMES[sides] ?? `Polygon (${sides})`)
-        : `Shape (${selectedShapeType})`;
+      let baseName: string;
+      if (isStar) {
+        baseName = `Star (${sides})`;
+      } else if (isPolygon) {
+        baseName = POLYGON_NAMES[sides] ?? `Polygon (${sides})`;
+      } else {
+        baseName = `Shape (${selectedShapeType})`;
+      }
       const layers = useDocumentStore.getState().project.layers;
       const shapeName = getUniqueLayerName(baseName, layers);
+
+      // For lines with start/end points, compute rotation and set layer position
+      let layerX = rect.x;
+      let layerY = rect.y;
+      let layerW = rect.width;
+      let layerH = rect.height;
+      let layerRotation = 0;
+
+      if (isLine && startPt && endPt) {
+        const dx = endPt.x - startPt.x;
+        const dy = endPt.y - startPt.y;
+        const lineLength = Math.sqrt(dx * dx + dy * dy);
+        const angleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
+
+        // Layer: horizontal line of width=lineLength, height=small value
+        const lineHeight = 4; // minimal height for the line shape
+        layerW = lineLength;
+        layerH = lineHeight;
+        layerRotation = angleDeg;
+
+        // Position: center of the line
+        const midX = (startPt.x + endPt.x) / 2;
+        const midY = (startPt.y + endPt.y) / 2;
+        layerX = midX - lineLength / 2;
+        layerY = midY - lineHeight / 2;
+      }
 
       const layer = createDefaultLayer({
         type: 'shape',
         name: shapeName,
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
+        x: layerX,
+        y: layerY,
+        width: layerW,
+        height: layerH,
+        rotation: layerRotation,
         shapeProperties: props,
       });
       storeAddLayer(layer);
       storeSelectLayer(layer.id);
       // Reset polygon sides for next drawing and switch to select tool
-      useUiStore.getState().setDrawPolygonSides(4);
+      if (!isStar) {
+        uiState.setDrawPolygonSides(4);
+      }
       setActiveTool('select');
     },
     [selectedShapeType, drawFillColor, drawStrokeColor, storePushUndo, storeAddLayer, storeSelectLayer, setActiveTool],
@@ -264,19 +314,21 @@ export function CanvasViewport({
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      // Only during active shape drawing with rectangle tool
+      // Only during active shape drawing
       if (interaction.dragMode !== 'drawShape') return;
       const shapeType = useUiStore.getState().selectedShapeType;
-      if (shapeType !== 'rectangle') return;
 
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        const current = useUiStore.getState().drawPolygonSides;
-        useUiStore.getState().setDrawPolygonSides(current - 1); // min 3 enforced in store
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        const current = useUiStore.getState().drawPolygonSides;
-        useUiStore.getState().setDrawPolygonSides(current + 1);
+      // Polygon sides: works for rectangle (polygon mode) and star
+      if (shapeType === 'rectangle' || shapeType === 'star') {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const current = useUiStore.getState().drawPolygonSides;
+          useUiStore.getState().setDrawPolygonSides(current - 1); // min 3 enforced in store
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          const current = useUiStore.getState().drawPolygonSides;
+          useUiStore.getState().setDrawPolygonSides(current + 1);
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -347,6 +399,7 @@ export function CanvasViewport({
             layer.width,
             layer.height,
             layer.shapeProperties.polygonSides,
+            layer.shapeProperties.starInnerRatio,
           );
           if (
             tight.x > 0 ||
@@ -798,6 +851,7 @@ export function CanvasViewport({
                 rect={effectiveMarqueeRect}
                 zoom={zoom}
                 isDrawing={interaction.dragMode === 'drawShape'}
+                dragStartState={interaction.dragStartState}
               />
 
               {/* Layer 8: HandleOverlay */}

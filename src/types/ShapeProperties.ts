@@ -37,6 +37,8 @@ export interface ShapeProperties {
   maskCenterY: number;
   /** Number of sides for polygon shapes (3 = triangle, 4 = rectangle, 5 = pentagon, etc.). */
   polygonSides: number;
+  /** Star inner radius ratio (0–1). innerR = outerR * starInnerRatio. */
+  starInnerRatio: number;
 }
 
 export function createDefaultShapeProperties(): ShapeProperties {
@@ -75,5 +77,6 @@ export function createDefaultShapeProperties(): ShapeProperties {
     maskCenterX: 0.5,
     maskCenterY: 0.5,
     polygonSides: 4,
+    starInnerRatio: 0.5,
   };
 }

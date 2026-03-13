@@ -7,6 +7,8 @@ export interface FillStrokeSwatchesProps {
   onFillClick?: () => void;
   /** Click handler for the stroke swatch. */
   onStrokeClick?: () => void;
+  /** When true, the fill swatch shows a red diagonal cross (fill not applicable, e.g. for lines). */
+  fillDisabled?: boolean;
 }
 
 /**
@@ -21,6 +23,7 @@ export function FillStrokeSwatches({
   strokeColor = '#000000',
   onFillClick,
   onStrokeClick,
+  fillDisabled = false,
 }: FillStrokeSwatchesProps) {
   return (
     <div
@@ -60,11 +63,21 @@ export function FillStrokeSwatches({
           style={{
             position: 'absolute',
             inset: 0,
-            backgroundColor: fillColor,
+            backgroundColor: fillDisabled ? '#666' : fillColor,
             border: '1.5px solid #555',
             borderRadius: 2,
           }}
         />
+        {/* Red diagonal cross when fill is disabled (e.g. line shape) */}
+        {fillDisabled && (
+          <svg
+            style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+            viewBox="0 0 24 24"
+          >
+            <line x1="2" y1="2" x2="22" y2="22" stroke="#e53e3e" strokeWidth="2.5" />
+            <line x1="22" y1="2" x2="2" y2="22" stroke="#e53e3e" strokeWidth="2.5" />
+          </svg>
+        )}
       </button>
 
       {/* Stroke swatch (in front, bottom-right) */}

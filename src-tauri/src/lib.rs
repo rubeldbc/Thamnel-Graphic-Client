@@ -32,6 +32,13 @@ pub fn run() {
             commands::open_in_explorer,
             commands::get_system_fonts,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Force-terminate the process to ensure all WebView2 child
+                // processes and memory are fully cleaned up on Windows.
+                std::process::exit(0);
+            }
+        });
 }

@@ -4,6 +4,7 @@ import type { ActiveTool } from '../types/enums';
 import type { LayerModel } from '../types/LayerModel';
 import type { SmartGuidesResult } from './useSmartGuides';
 import { ROTATE_CURSOR, ROTATE_CURSORS } from '../components/Canvas/HandleOverlay';
+import { useUiStore } from '../stores/uiStore';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -442,7 +443,7 @@ export interface UseCanvasInteractionOptions {
   /** Currently active tool from uiStore. */
   activeTool?: ActiveTool;
   /** Callback when a shape is drawn via marquee (drawShape mode). Rect in canvas coords. */
-  onShapeDrawn?: (rect: { x: number; y: number; width: number; height: number }) => void;
+  onShapeDrawn?: (rect: { x: number; y: number; width: number; height: number }, startPt?: { x: number; y: number }, endPt?: { x: number; y: number }) => void;
   /** Callback to duplicate a layer. Returns the new cloned layer. */
   onDuplicateLayer?: (layer: LayerModel) => LayerModel | null;
 }
@@ -492,6 +493,8 @@ export function useCanvasInteraction(
   const [dragStartState, setDragStartState] = useState<DragStartState | null>(null);
 
   const dragStartRef = useRef<DragStartState | null>(null);
+  // Store the raw end point for line drawing (before normalization)
+  const lineEndRef = useRef<{ x: number; y: number } | null>(null);
 
   const updateModifiers = useCallback((e: React.MouseEvent | React.WheelEvent) => {
     setModifiers({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey });
@@ -1016,20 +1019,58 @@ export function useCanvasInteraction(
         let w = canvasPos.x - start.canvasX;
         let h = canvasPos.y - start.canvasY;
 
-        // Shift: constrain to equal sides (square / regular polygon), anchored from start corner
-        if (e.shiftKey) {
-          const side = Math.max(Math.abs(w), Math.abs(h));
-          w = w >= 0 ? side : -side;
-          h = h >= 0 ? side : -side;
-        }
+        // Check if we're drawing a line shape
+        const currentShapeType = useUiStore.getState().selectedShapeType;
+        const isLineDraw = start.dragMode === 'drawShape' && currentShapeType === 'line';
 
-        const rect = {
-          x: w >= 0 ? start.canvasX : start.canvasX + w,
-          y: h >= 0 ? start.canvasY : start.canvasY + h,
-          width: Math.abs(w),
-          height: Math.abs(h),
-        };
-        setMarqueeRect(rect);
+        if (isLineDraw) {
+          // Line drawing: compute angle and length from start to end
+          let endX = canvasPos.x;
+          let endY = canvasPos.y;
+
+          // Shift: snap angle to nearest 45° increment
+          if (e.shiftKey) {
+            const dx = endX - start.canvasX;
+            const dy = endY - start.canvasY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const rawAngle = Math.atan2(dy, dx);
+            const snapped = Math.round(rawAngle / (Math.PI / 4)) * (Math.PI / 4);
+            endX = start.canvasX + dist * Math.cos(snapped);
+            endY = start.canvasY + dist * Math.sin(snapped);
+          }
+
+          // Store the raw end point for handleShapeDrawn
+          lineEndRef.current = { x: endX, y: endY };
+
+          // Marquee rect = bounding box of the line
+          const minX = Math.min(start.canvasX, endX);
+          const minY = Math.min(start.canvasY, endY);
+          const maxX = Math.max(start.canvasX, endX);
+          const maxY = Math.max(start.canvasY, endY);
+          setMarqueeRect({
+            x: minX,
+            y: minY,
+            width: Math.max(maxX - minX, 1),
+            height: Math.max(maxY - minY, 1),
+          });
+        } else {
+          // Normal shape: Shift constrains to equal sides (square / regular polygon)
+          if (e.shiftKey) {
+            const side = Math.max(Math.abs(w), Math.abs(h));
+            w = w >= 0 ? side : -side;
+            h = h >= 0 ? side : -side;
+          }
+
+          lineEndRef.current = null;
+
+          const rect = {
+            x: w >= 0 ? start.canvasX : start.canvasX + w,
+            y: h >= 0 ? start.canvasY : start.canvasY + h,
+            width: Math.abs(w),
+            height: Math.abs(h),
+          };
+          setMarqueeRect(rect);
+        }
       }
 
       // Pan
@@ -1069,8 +1110,18 @@ export function useCanvasInteraction(
 
       // Finalize drawShape — create shape if drag > 5px (WPF threshold)
       if (start?.dragMode === 'drawShape' && marqueeRect) {
-        if (marqueeRect.width > 5 && marqueeRect.height > 5) {
-          onShapeDrawn?.(marqueeRect);
+        const startPt = { x: start.canvasX, y: start.canvasY };
+        const endPt = lineEndRef.current;
+        // For lines, check distance instead of rect dimensions
+        if (endPt) {
+          const dx = endPt.x - startPt.x;
+          const dy = endPt.y - startPt.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 5) {
+            onShapeDrawn?.(marqueeRect, startPt, endPt);
+          }
+        } else if (marqueeRect.width > 5 && marqueeRect.height > 5) {
+          onShapeDrawn?.(marqueeRect, startPt);
         }
       }
 
@@ -1079,6 +1130,7 @@ export function useCanvasInteraction(
 
       setIsDragging(false);
       dragStartRef.current = null;
+      lineEndRef.current = null;
       setDragStartState(null);
       setDragDelta({ x: 0, y: 0 });
       setDragMode('none');
