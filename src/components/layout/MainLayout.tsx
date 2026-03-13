@@ -8,6 +8,7 @@ import { CanvasViewport } from '../Canvas/CanvasViewport';
 import { FrameGallery } from '../FrameGallery/FrameGallery';
 import { RightPanel } from '../RightPanel/RightPanel';
 import { StatusBar } from '../StatusBar/StatusBar';
+import { DebugPanel } from '../DebugPanel/DebugPanel';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import type { KeyboardShortcutActions } from '../../hooks/useKeyboardShortcuts';
 import { getCommand } from '../../commands/useCommand';
@@ -246,6 +247,9 @@ export function MainLayout() {
       <div className="shrink-0" style={{ height: 28 }} data-testid="panel-statusbar">
         <StatusBar />
       </div>
+
+      {/* Debug Panel (floating overlay, toggle with F12) */}
+      <DebugPanel />
     </div>
   );
 }

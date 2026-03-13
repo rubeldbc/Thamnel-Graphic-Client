@@ -694,7 +694,7 @@ export function CanvasViewport({
   // fresh data. Runs alongside the CPU compositor below — GPU overwrites the
   // canvas with higher-quality output when available.
   // ---------------------------------------------------------------------------
-  useGpuRenderer({
+  const { gpuActive } = useGpuRenderer({
     canvasRef: renderCanvasRef,
     canvasWidth,
     canvasHeight,
@@ -702,9 +702,11 @@ export function CanvasViewport({
     enabled: true,
   });
 
-  // CPU compositor: runs once per dependency change for immediate feedback.
-  // GPU renderer handles continuous updates asynchronously.
+  // CPU compositor: fallback only when GPU renderer is not active.
+  // When GPU is active, it handles all rendering via Rust wgpu+Vello.
   useEffect(() => {
+    if (gpuActive) return; // GPU handles rendering — skip CPU fallback
+
     const displayCanvas = renderCanvasRef.current;
     if (!displayCanvas) return;
 
@@ -728,7 +730,7 @@ export function CanvasViewport({
     }
 
     console.debug(`[CPU] composite: ${(performance.now() - t0).toFixed(1)}ms`);
-  }, [layers, canvasWidth, canvasHeight, backgroundColor]);
+  }, [layers, canvasWidth, canvasHeight, backgroundColor, gpuActive]);
 
   // ---------------------------------------------------------------------------
   // Derived layout values

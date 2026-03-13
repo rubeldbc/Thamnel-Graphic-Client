@@ -45,6 +45,7 @@ pub fn run() {
             document_bridge::load_legacy_rbl,
             // Render bridge (Phase 2)
             render_bridge::render_frame,
+            render_bridge::render_frame_bin,
             render_bridge::export_render,
             // Hit-testing (Phase 3)
             render_bridge::hit_test,

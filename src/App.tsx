@@ -3,12 +3,21 @@ import { MainLayout } from './components/layout/MainLayout';
 import { DialogHost } from './components/Dialogs/DialogHost';
 import { useSettingsStore } from './settings/settingsStore';
 import { useUiStore } from './stores/uiStore';
+import { useDocumentStore } from './stores/documentStore';
+import { dlog } from './stores/debugStore';
 
 function App() {
   // Load persisted settings on startup and restore last zoom
   useEffect(() => {
+    const project = useDocumentStore.getState().project;
+    dlog.generalInfo(
+      'Application started',
+      `Canvas: ${project.canvasWidth}x${project.canvasHeight} | Layers: ${project.layers.length}`,
+    );
+
     const settingsStore = useSettingsStore.getState();
     settingsStore.loadSettings();
+    dlog.generalInfo('Settings loaded');
 
     // Restore last canvas zoom from settings
     const lastZoom = settingsStore.getSetting('canvas.lastZoom') as number;

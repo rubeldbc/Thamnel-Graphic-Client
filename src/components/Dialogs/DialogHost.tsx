@@ -253,10 +253,13 @@ export function DialogHost() {
         onOpenChange={handleOpenChange}
       />
 
-      {/* Debug Log */}
+      {/* Debug Log (self-managed overlay, not DialogBase) */}
       <DebugWindow
         open={activeDialog === 'debugLog' || activeDialog === 'debug'}
-        onOpenChange={handleOpenChange}
+        onOpenChange={(open) => {
+          if (!open) close();
+          else useUiStore.getState().setActiveDialog('debugLog');
+        }}
       />
 
       {/* Batch Producer */}

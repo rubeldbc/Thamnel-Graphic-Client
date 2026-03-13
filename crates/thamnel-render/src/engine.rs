@@ -237,6 +237,10 @@ impl RenderBackend for RenderEngine {
         viewport: &Viewport,
         selection: &SelectionInfo,
     ) -> Result<(), RenderError> {
+        // Store viewport dimensions so render() and readback() use correct size
+        self.target_width = viewport.width;
+        self.target_height = viewport.height;
+
         self.scene.reset();
         compositor::build_document_scene(
             &mut self.scene,

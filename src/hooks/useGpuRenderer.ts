@@ -5,16 +5,7 @@ import { useDocumentStore } from '../stores/documentStore';
 import { getRustSyncVersion } from '../stores/documentStore';
 import { useMediaStore } from '../stores/mediaStore';
 import { useUiStore } from '../stores/uiStore';
-
-// ---------------------------------------------------------------------------
-// Fast base64 → ArrayBuffer using browser-native fetch decoder
-// (~10x faster than atob + charCodeAt loop for large payloads)
-// ---------------------------------------------------------------------------
-
-async function base64ToArrayBuffer(b64: string): Promise<ArrayBuffer> {
-  const res = await fetch(`data:application/octet-stream;base64,${b64}`);
-  return res.arrayBuffer();
-}
+import { useDebugStore, dlog } from '../stores/debugStore';
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -24,7 +15,7 @@ export interface UseGpuRendererOptions {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   canvasWidth: number;
   canvasHeight: number;
-  selectedLayerIds: string[];
+  selectedLayerIds: string[];  // reserved for future selection gizmo rendering
   enabled: boolean;
 }
 
@@ -38,9 +29,8 @@ const GPU_RENDER_INTERVAL_MS = 100;
 /**
  * Drives the live viewport render loop via the Rust GPU pipeline (wgpu + Vello).
  *
- * Polls the sync version counter and only dispatches a render_frame IPC when
- * Rust has fresh data AND at least GPU_RENDER_INTERVAL_MS has passed since the
- * last render dispatch.
+ * Binary IPC — raw RGBA ArrayBuffer with 24-byte header (no base64).
+ * Pushes detailed render logs to the debug store.
  */
 export function useGpuRenderer({
   canvasRef,
@@ -49,6 +39,9 @@ export function useGpuRenderer({
   selectedLayerIds,
   enabled,
 }: UseGpuRendererOptions): UseGpuRendererResult {
+  // selectedLayerIds reserved for future selection gizmo rendering
+  void selectedLayerIds;
+
   const [gpuActive, setGpuActive] = useState(false);
 
   const inFlight = useRef(false);
@@ -58,6 +51,7 @@ export function useGpuRenderer({
   const lastRenderedSyncVersion = useRef(-1);
   const lastDispatchTime = useRef(0);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const frameCounter = useRef(0);
 
   // Keep latest values in refs so the RAF callback never goes stale
   const widthRef = useRef(canvasWidth);
@@ -95,6 +89,13 @@ export function useGpuRenderer({
       const w = widthRef.current;
       const h = heightRef.current;
 
+      // Skip render if canvas dimensions are not ready
+      if (w <= 0 || h <= 0) {
+        inFlight.current = false;
+        rafId.current = requestAnimationFrame(tick);
+        return;
+      }
+
       const viewport: ViewportParams = {
         width: w,
         height: h,
@@ -110,7 +111,7 @@ export function useGpuRenderer({
       const t0 = performance.now();
 
       renderFrame(viewport, selection)
-        .then(async (b64: string) => {
+        .then((result) => {
           const t_ipc = performance.now();
 
           const canvas = canvasRefStable.current;
@@ -119,19 +120,24 @@ export function useGpuRenderer({
             return;
           }
 
-          // Fast browser-native base64 decode
-          const buffer = await base64ToArrayBuffer(b64);
-          const t_decode = performance.now();
-
-          const expected = w * h * 4;
-          if (buffer.byteLength < expected) {
-            console.warn(`[GPU] buffer too small: ${buffer.byteLength} < ${expected}`);
+          // Skip painting if dimensions are 0 or pixel data doesn't match
+          const expectedBytes = result.width * result.height * 4;
+          if (result.width === 0 || result.height === 0 || result.pixels.byteLength === 0) {
+            inFlight.current = false;
+            return;
+          }
+          if (result.pixels.byteLength < expectedBytes) {
+            dlog.renderWarn(
+              `Pixel data size mismatch: got ${result.pixels.byteLength} bytes, need ${expectedBytes} (${result.width}x${result.height}x4)`,
+            );
             inFlight.current = false;
             return;
           }
 
-          const pixels = new Uint8ClampedArray(buffer, 0, expected);
-          const imageData = new ImageData(pixels, w, h);
+          // Copy into a fresh ArrayBuffer to satisfy ImageData's type constraint
+          const buf = new ArrayBuffer(expectedBytes);
+          new Uint8Array(buf).set(new Uint8Array(result.pixels.buffer, result.pixels.byteOffset, expectedBytes));
+          const imageData = new ImageData(new Uint8ClampedArray(buf), result.width, result.height);
 
           // Cache the 2D context
           if (!ctxRef.current || ctxRef.current.canvas !== canvas) {
@@ -149,9 +155,57 @@ export function useGpuRenderer({
           }
 
           const t_paint = performance.now();
-          console.debug(
-            `[GPU] ipc: ${(t_ipc - t0).toFixed(1)}ms, decode: ${(t_decode - t_ipc).toFixed(1)}ms, paint: ${(t_paint - t_decode).toFixed(1)}ms, total: ${(t_paint - t0).toFixed(1)}ms`
-          );
+          const ipcMs = t_ipc - t0;
+          const paintMs = t_paint - t_ipc;
+          const totalMs = t_paint - t0;
+
+          // Feed debug store with detailed metrics
+          frameCounter.current += 1;
+          const debugStore = useDebugStore.getState();
+          const frameNum = frameCounter.current;
+
+          debugStore.pushFrame({
+            frameNumber: frameNum,
+            timestamp: t_paint,
+            ipcMs,
+            paintMs,
+            totalMs,
+            rustRenderMs: result.renderTimeUs / 1000,
+            rustPrepareMs: result.prepareUs / 1000,
+            rustReadbackMs: result.readbackUs / 1000,
+            frameSizeBytes: result.pixels.byteLength,
+            nodeCount: result.nodeCount,
+            width: result.width,
+            height: result.height,
+          });
+
+          debugStore.setSyncVersion(syncVersionAtRender);
+
+          // Push detailed render log (only if render category is enabled)
+          if (debugStore.enabledCategories.render) {
+            const detail = [
+              `Frame #${frameNum} | ${result.width}x${result.height} | ${result.nodeCount} nodes`,
+              `Rust: prepare=${(result.prepareUs / 1000).toFixed(2)}ms render=${(result.renderTimeUs / 1000).toFixed(2)}ms readback=${(result.readbackUs / 1000).toFixed(2)}ms`,
+              `JS: ipc=${ipcMs.toFixed(2)}ms paint=${paintMs.toFixed(2)}ms total=${totalMs.toFixed(2)}ms`,
+              `Buffer: ${(result.pixels.byteLength / 1024).toFixed(0)}KB (binary IPC) | SyncVer: ${syncVersionAtRender}`,
+            ].join(' | ');
+
+            // Log every frame for now (to verify binary IPC performance)
+            if (true) {
+              dlog.renderInfo(
+                `Frame #${frameNum}: ${totalMs.toFixed(1)}ms (GPU: ${(result.renderTimeUs / 1000).toFixed(1)}ms, IPC: ${ipcMs.toFixed(1)}ms)`,
+                detail,
+              );
+            }
+
+            // Log warnings for slow frames
+            if (totalMs > 200) {
+              dlog.renderWarn(
+                `Slow frame #${frameNum}: ${totalMs.toFixed(1)}ms total`,
+                detail,
+              );
+            }
+          }
 
           lastRenderedSyncVersion.current = syncVersionAtRender;
 
@@ -159,6 +213,11 @@ export function useGpuRenderer({
             activated.current = true;
             setGpuActive(true);
             useMediaStore.getState().setInferenceDevice('GPU');
+            debugStore.setGpuActive(true);
+            dlog.renderInfo(
+              `GPU renderer activated (wgpu + Vello)`,
+              `Viewport: ${result.width}x${result.height} | Nodes: ${result.nodeCount}`,
+            );
           }
 
           inFlight.current = false;
@@ -166,10 +225,13 @@ export function useGpuRenderer({
         .catch((err) => {
           console.error('[GPU] renderFrame failed:', err);
           useUiStore.getState().setStatusMessage(`GPU render error: ${err}`);
+          dlog.renderError(`renderFrame IPC failed: ${err}`);
+          useDebugStore.getState().setLastError(String(err));
           failed.current = true;
           activated.current = false;
           setGpuActive(false);
           useMediaStore.getState().setInferenceDevice('CPU');
+          useDebugStore.getState().setGpuActive(false);
           inFlight.current = false;
         });
     }
@@ -188,11 +250,13 @@ export function useGpuRenderer({
     failed.current = false;
     lastRenderedSyncVersion.current = -1;
     lastDispatchTime.current = 0;
+    dlog.renderInfo('GPU render loop started');
 
     rafId.current = requestAnimationFrame(tick);
 
     return () => {
       cancelAnimationFrame(rafId.current);
+      dlog.renderInfo('GPU render loop stopped');
     };
   }, [enabled, tick]);
 

@@ -5,6 +5,7 @@ import type { DocumentModel } from '../types/document-model';
 import type { Node } from '../types/node';
 import { legacyProjectToDocument } from '../types/compat';
 import { setDocument as rustSetDocument } from '../bridge/documentBridge';
+import { dlog } from './debugStore';
 
 export interface DocumentState {
   project: ProjectModel;
@@ -77,18 +78,24 @@ function syncProjectToRust(project: ProjectModel): void {
     clearTimeout(syncTimer);
     syncTimer = null;
   }
+  const t0 = performance.now();
   syncTimer = setTimeout(() => {
     try {
       const doc = legacyProjectToDocument(project);
+      const convertMs = performance.now() - t0;
       rustSetDocument(doc)
         .then(() => {
           _rustSyncVersion += 1;
+          const totalMs = performance.now() - t0;
+          dlog.syncInfo(
+            `Sync v${_rustSyncVersion}: ${doc.nodes.length} nodes, convert=${convertMs.toFixed(1)}ms, total=${totalMs.toFixed(1)}ms`,
+          );
         })
-        .catch(() => {
-          // Silently ignore — Tauri runtime may not be available in dev/test
+        .catch((err) => {
+          dlog.syncError(`Rust setDocument IPC failed: ${err}`);
         });
-    } catch {
-      // Conversion error — non-fatal
+    } catch (err) {
+      dlog.syncError(`Document conversion failed: ${err}`);
     }
   }, 16); // reduced from 50ms to ~1 frame for faster GPU sync
 }
@@ -109,32 +116,45 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
   setProject: (project) =>
     set({ project, selectedLayerIds: [], undoStack: [], redoStack: [] }),
 
-  addLayer: (layer) =>
+  addLayer: (layer) => {
+    dlog.imageInfo(`Layer added: "${layer.name}" (${layer.type}, ${layer.id.slice(0, 8)})`);
     set((state) => ({
       project: {
         ...state.project,
         layers: [...state.project.layers, layer],
       },
-    })),
+    }));
+  },
 
-  addLayerAtIndex: (layer, index) =>
+  addLayerAtIndex: (layer, index) => {
+    dlog.imageInfo(`Layer added at #${index}: "${layer.name}" (${layer.type}, ${layer.id.slice(0, 8)})`);
     set((state) => {
       const layers = [...state.project.layers];
       const clamped = Math.max(0, Math.min(index, layers.length));
       layers.splice(clamped, 0, layer);
       return { project: { ...state.project, layers } };
-    }),
+    });
+  },
 
-  removeLayer: (layerId) =>
+  removeLayer: (layerId) => {
+    const layer = get().project.layers.find((l) => l.id === layerId);
+    dlog.imageInfo(`Layer removed: "${layer?.name ?? '?'}" (${layerId.slice(0, 8)})`);
     set((state) => ({
       project: {
         ...state.project,
         layers: state.project.layers.filter((l) => l.id !== layerId),
       },
       selectedLayerIds: state.selectedLayerIds.filter((id) => id !== layerId),
-    })),
+    }));
+  },
 
-  updateLayer: (layerId, changes) =>
+  updateLayer: (layerId, changes) => {
+    const changedKeys = Object.keys(changes);
+    if (changedKeys.length > 0 && !changedKeys.every((k) => k === 'renderVersion')) {
+      dlog.imageInfo(
+        `Layer updated: ${layerId.slice(0, 8)} [${changedKeys.join(', ')}]`,
+      );
+    }
     set((state) => ({
       project: {
         ...state.project,
@@ -144,7 +164,8 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
             : l,
         ),
       },
-    })),
+    }));
+  },
 
   moveLayer: (layerId, newIndex) =>
     set((state) => {
