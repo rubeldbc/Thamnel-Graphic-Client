@@ -246,7 +246,7 @@ fn get_video_duration(ffmpeg_path: &str, video_path: &str) -> Result<f64, String
             let trimmed = after_duration.trim_start();
             // Now trimmed should start with "HH:MM:SS.ff" or "HH:MM:SS,ff"
             let parts: Vec<&str> = trimmed
-                .split(|c: char| c == ':' || c == '.' || c == ',')
+                .split([':', '.', ','])
                 .collect();
             if parts.len() >= 4 {
                 let hours: f64 = parts[0].trim().parse().unwrap_or(0.0);
@@ -299,7 +299,7 @@ pub async fn extract_video_frames(
 ) -> Result<Vec<ExtractedFrame>, String> {
     // Resolve FFmpeg path
     let resolved_ffmpeg = find_ffmpeg(&ffmpeg_path)?;
-    let frame_count = frame_count.max(1).min(100);
+    let frame_count = frame_count.clamp(1, 100);
 
     // Get video duration
     let duration = get_video_duration(&resolved_ffmpeg, &video_path)?;
@@ -354,23 +354,20 @@ pub async fn extract_video_frames(
             .stderr(std::process::Stdio::piped())
             .output();
 
-        match result {
-            Ok(_output) => {
-                if output_path.exists() {
-                    if let Ok(bytes) = fs::read(&output_path) {
-                        if !bytes.is_empty() {
-                            let b64 =
-                                base64::engine::general_purpose::STANDARD.encode(&bytes);
-                            frames.push(ExtractedFrame {
-                                timestamp: format_display_timestamp(timestamp_sec),
-                                base64_png: format!("data:image/jpeg;base64,{}", b64),
-                            });
-                        }
+        if let Ok(_output) = result {
+            if output_path.exists() {
+                if let Ok(bytes) = fs::read(&output_path) {
+                    if !bytes.is_empty() {
+                        let b64 =
+                            base64::engine::general_purpose::STANDARD.encode(&bytes);
+                        frames.push(ExtractedFrame {
+                            timestamp: format_display_timestamp(timestamp_sec),
+                            base64_png: format!("data:image/jpeg;base64,{}", b64),
+                        });
                     }
-                    let _ = fs::remove_file(&output_path);
                 }
+                let _ = fs::remove_file(&output_path);
             }
-            Err(_) => {} // Skip frames that fail
         }
     }
 

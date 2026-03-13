@@ -1,4 +1,5 @@
 mod commands;
+mod document_bridge;
 mod settings;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -7,6 +8,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .manage(document_bridge::AppDocumentState::default())
         .invoke_handler(tauri::generate_handler![
             // Existing
             commands::greet,
@@ -31,6 +33,14 @@ pub fn run() {
             // System
             commands::open_in_explorer,
             commands::get_system_fonts,
+            // Document bridge (Phase 0)
+            document_bridge::get_document,
+            document_bridge::set_document,
+            document_bridge::apply_command,
+            document_bridge::undo_document,
+            document_bridge::redo_document,
+            document_bridge::get_history_state,
+            document_bridge::load_legacy_rbl,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
